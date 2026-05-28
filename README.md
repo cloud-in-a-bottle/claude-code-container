@@ -49,6 +49,36 @@ This is intentionally minimal — the intent is that openhost error pages
 (503 from openhost or from an app) can POST request info and app logs
 here and then link the user to a pre-loaded Claude session.
 
+## "Let's debug this" link
+
+`GET /debug` is a directly-linkable version of the above, built for error
+pages: it clones a repo at a given commit and drops you into a terminal
+sitting in that checkout.
+
+```
+GET /debug?repo=<clone-url>&sha=<sha>&prompt=<text>&context=<text>
+  -> 302 redirect to /?session=<token>
+```
+
+- `repo` (required) — an `https://`, `http://`, `ssh://`, or `git@…` clone
+  URL. Other transports (e.g. `ext::`, `file://`) are rejected.
+- `sha` / `ref` (optional) — a commit, tag, or branch to check out.
+- `prompt` / `context` (optional) — if either is given, `claude` starts in
+  the checkout pre-loaded with them; otherwise you get an interactive shell.
+
+So an app that 500s can render a "let's debug this" button linking to
+`https://<workbench>/debug?repo=…&sha=<the-deployed-commit>&context=<traceback>`,
+and one click lands the user in a fresh checkout of the exact code that
+failed, optionally with Claude already on the case.
+
+The clone lands at `$HOME/<repo-name>`. Clicking a link for a repo you've
+already checked out **reuses** that directory rather than clobbering it: it
+fetches, and if the working tree has uncommitted changes it asks — right in
+the terminal — whether to commit them to a `workbench-wip-…` branch, stash
+them, drop them, or keep them as-is and stop. Only once the tree is clean
+does it check out the requested ref. (If the tab is closed/stale and there's
+no one to answer, it leaves your changes untouched and gives you a shell.)
+
 ## Running locally without openhost
 
 ```

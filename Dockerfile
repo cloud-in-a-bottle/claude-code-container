@@ -61,6 +61,7 @@ ENV HOME=/home/workbench
 
 WORKDIR /app
 COPY server.py /app/server.py
+COPY debug.sh /app/debug.sh
 COPY templates /app/templates
 COPY static /app/static
 COPY skills /app/skills
