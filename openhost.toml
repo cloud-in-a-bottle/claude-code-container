@@ -14,6 +14,14 @@ health_check = "/health"
 memory_mb = 1024
 cpu_millicores = 1000
 
+# claude-workbench is the first provider of the open-workspace service: a valid
+# repo + ref redirects the user into a checkout of that repo at that commit.
+# The contract lives in this repo under services/open-workspace/.
+[[services.v2.provides]]
+service = "github.com/imbue-openhost/claude-code-container/services/open-workspace"
+version = "0.1.0"
+endpoint = "/open-workspace"
+
 # Pull ANTHROPIC_API_KEY from the secrets app if it's installed. The fetch is
 # best-effort — if secrets-v2 isn't around or the key isn't set, the terminal
 # still works and the user can `claude login` or export the key by hand.
@@ -24,4 +32,16 @@ version = ">=0.1.0"
 grants = [
     {key = "ANTHROPIC_API_KEY"},
     {key = "OH_TOKEN"},
+]
+
+# Mint a transient GitHub token so open-workspace can clone private repos that
+# openhost has access to (same OAuth flow openhost uses). Best-effort — public
+# repos clone without it, and if no grant exists the clone falls back to
+# unauthenticated.
+[[services.v2.consumes]]
+service = "github.com/imbue-openhost/openhost/services/oauth"
+shortname = "oauth"
+version = ">=0.1.0"
+grants = [
+    {provider = "github", scopes = ["repo"]},
 ]

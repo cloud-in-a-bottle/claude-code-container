@@ -7,10 +7,10 @@ Routes:
     POST /api/sessions             -> queue a prefilled Claude session; returns {id, url}
                                       body: {"prompt": "...", "context": "..."}
                                       the next WS that connects with ?session=<id> picks it up
-    GET  /debug                    -> clone a repo at a sha and drop into a terminal;
-                                      redirects to /?session=<id>
-                                      query: repo (required), sha/ref, prompt, context
-                                      meant as a "let's debug this" link on app error pages
+    POST /open-workspace           -> open-workspace service provider: clone a repo at a
+                                      ref and 303-redirect into a checkout of it.
+                                      body (form or json): repo (required), ref (required)
+                                      contract: services/open-workspace/openapi.yaml
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ import signal
 import struct
 import subprocess
 import termios
+import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -40,6 +41,7 @@ OPENHOST_DIR = Path(os.environ.get("OPENHOST_DIR", str(HOME / "openhost")))
 ROUTER_URL = os.environ.get("OPENHOST_ROUTER_URL", "")
 APP_TOKEN = os.environ.get("OPENHOST_APP_TOKEN", "")
 SECRETS_SHORTNAME = "secrets"
+OAUTH_SHORTNAME = "oauth"
 
 app = Quart(__name__, template_folder=str(APP_DIR / "templates"), static_folder=str(APP_DIR / "static"))
 
@@ -71,6 +73,32 @@ async def _fetch_secrets(keys: list[str]) -> dict[str, str]:
 async def _fetch_anthropic_key() -> str:
     """Ask the secrets-v2 app for ANTHROPIC_API_KEY. Returns "" if unavailable."""
     return (await _fetch_secrets(["ANTHROPIC_API_KEY"])).get("ANTHROPIC_API_KEY", "")
+
+
+async def _fetch_github_token() -> str:
+    """Mint a `repo`-scoped GitHub token via the oauth-v2 app. "" if unavailable.
+
+    Mirrors openhost's own clone flow (core/oauth.py `get_oauth_token`): the
+    token lets us clone private repos openhost has access to. Best-effort — if
+    the oauth app isn't installed, the grant is missing, or no GitHub account is
+    connected, we get a non-200 and return "" so the caller falls back to an
+    unauthenticated clone.
+    """
+    if not ROUTER_URL or not APP_TOKEN:
+        return ""
+    url = f"{ROUTER_URL}/api/services/v2/call/{OAUTH_SHORTNAME}/token"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                url,
+                json={"provider": "github", "scopes": ["repo"]},
+                headers={"Authorization": f"Bearer {APP_TOKEN}"},
+            )
+        if resp.status_code != 200:
+            return ""
+        return (resp.json().get("access_token") or "").strip()
+    except Exception:
+        return ""
 
 
 async def _seed_oh_config() -> None:
@@ -139,11 +167,15 @@ _REPO_RE = re.compile(r"^(https?://|ssh://|git@)[^\s]+$")
 # A git ref/sha: no leading dash (would be read as a `git checkout` flag) and a
 # conservative character set.
 _REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+# A ref that looks like a bare commit sha. `git ls-remote` only lists named
+# refs, so a sha can't be validated ahead of the clone — we skip the pre-check
+# for these and let the checkout degrade gracefully if the commit is missing.
+_SHA_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
 
-# The /debug terminal runs this script (see debug.sh for what it does). It takes
+# The open-workspace terminal runs this script (see open_workspace.sh). It takes
 # all its inputs from env vars set on the PendingSession, so there's nothing to
 # interpolate here and no shell injection surface.
-_DEBUG_SCRIPT = APP_DIR / "debug.sh"
+_WORKSPACE_SCRIPT = APP_DIR / "open_workspace.sh"
 
 
 def _repo_dir_name(url: str) -> str:
@@ -153,6 +185,119 @@ def _repo_dir_name(url: str) -> str:
         name = name[:-4]
     name = re.sub(r"[^A-Za-z0-9._-]", "", name)
     return name or "repo"
+
+
+# ── open-workspace access resolution ──────────────────────────────────────
+#
+# Before redirecting, /open-workspace probes the repo with `git ls-remote` so it
+# can answer with the contract's status codes (services/open-workspace/openapi.yaml):
+#   403 — repo is private and we have no authorization to reach it
+#   404 — repo, or a named ref, does not exist
+#   500 — network/internal failure
+# A repo we can read unauthenticated needs no token; a private GitHub repo is
+# retried with a freshly-minted token, which is then handed to the clone.
+
+_NETWORK_ERR_RE = re.compile(
+    r"could ?n.?t resolve host|could not resolve|failed to connect|connection (timed out|refused)"
+    r"|could not connect|network is unreachable|temporary failure in name resolution",
+    re.IGNORECASE,
+)
+_AUTH_ERR_RE = re.compile(
+    r"authentication failed|could not read username|could not read password"
+    r"|terminal prompts disabled|permission denied|access denied|denied to|403 forbidden",
+    re.IGNORECASE,
+)
+
+
+@dataclass
+class RepoAccess:
+    """Outcome of probing a repo: a status decision plus the token (if any) the
+    clone should use."""
+
+    decision: str  # "ok" | "forbidden" | "not_found" | "error"
+    token: str = ""
+    detail: str = ""
+
+
+def _git_host(url: str) -> str:
+    """Hostname of a clone URL, handling both URL and scp-like (`git@host:path`) forms."""
+    scp = re.match(r"^[A-Za-z0-9._-]+@([^:/]+):", url)
+    if scp:
+        return scp.group(1).lower()
+    return (urllib.parse.urlparse(url).hostname or "").lower()
+
+
+def _is_github(url: str) -> bool:
+    host = _git_host(url)
+    return host == "github.com" or host.endswith(".github.com")
+
+
+def _inject_github_token(url: str, token: str) -> str:
+    """Put a token into an http(s) URL's authority for a one-shot authenticated
+    git operation. Matches openhost's `inject_github_token_in_url`. Non-http
+    transports (ssh) are returned unchanged — the token can't be applied."""
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme in ("http", "https") and parsed.hostname:
+        host = parsed.hostname + (f":{parsed.port}" if parsed.port else "")
+        return parsed._replace(netloc=f"{token}@{host}").geturl()
+    return url
+
+
+async def _run_ls_remote(repo: str, ref: str | None, token: str) -> tuple[int, str, str]:
+    """Run `git ls-remote <repo> [ref]` with prompts disabled. Returns
+    (returncode, stdout, stderr); returncode 124 signals a timeout. Inputs are
+    validated before this is called and passed as argv, so there's no shell."""
+    url = _inject_github_token(repo, token) if token else repo
+    args = ["git", "ls-remote", url]
+    if ref:
+        args.append(ref)
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -oBatchMode=yes"}
+    proc = await asyncio.create_subprocess_exec(
+        *args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env
+    )
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=25)
+    except asyncio.TimeoutError:
+        proc.kill()
+        return 124, "", "timed out"
+    return proc.returncode, out.decode(errors="replace"), err.decode(errors="replace")
+
+
+async def _resolve_access(repo: str, ref: str) -> RepoAccess:
+    """Probe `repo`/`ref`, minting a GitHub token if the repo is private."""
+    # A named ref (branch/tag) can be confirmed via ls-remote; a bare sha can't,
+    # so for shas we only probe repo reachability and let the checkout degrade.
+    ref_probe = None if _SHA_RE.match(ref) else ref
+
+    rc, out, err = await _run_ls_remote(repo, ref_probe, token="")
+    if rc == 0:
+        if ref_probe is not None and not out.strip():
+            return RepoAccess("not_found", detail=f"ref {ref!r} not found")
+        return RepoAccess("ok")
+    if rc == 124 or _NETWORK_ERR_RE.search(err):
+        return RepoAccess("error", detail=err.strip())
+
+    # Unauthenticated read failed. For GitHub, retry with a minted token.
+    if _is_github(repo):
+        token = await _fetch_github_token()
+        if token and _inject_github_token(repo, token) != repo:
+            rc2, out2, err2 = await _run_ls_remote(repo, ref_probe, token=token)
+            if rc2 == 0:
+                if ref_probe is not None and not out2.strip():
+                    return RepoAccess("not_found", detail=f"ref {ref!r} not found")
+                return RepoAccess("ok", token=token)
+            if rc2 == 124 or _NETWORK_ERR_RE.search(err2):
+                return RepoAccess("error", detail=err2.strip())
+            # Even with our token we can't see it: treat as not found.
+            return RepoAccess("not_found", detail=err2.strip())
+        # No usable token (no grant / no connected account / ssh transport):
+        # the repo is private and we have no authorization for it.
+        return RepoAccess("forbidden", detail=err.strip())
+
+    # Non-GitHub host — classify from git's own error text.
+    if _AUTH_ERR_RE.search(err):
+        return RepoAccess("forbidden", detail=err.strip())
+    return RepoAccess("not_found", detail=err.strip())
 
 
 def _set_winsize(fd: int, rows: int, cols: int) -> None:
@@ -198,44 +343,67 @@ async def create_session() -> object:
     return jsonify({"id": sid, "url": f"/?session={sid}"})
 
 
-@app.get("/debug")
-async def debug() -> object:
-    """Pre-seed a terminal that clones a repo at a given sha, then redirect to it.
+async def _read_repo_ref() -> tuple[str, str]:
+    """Read `repo` and `ref` from a form body, a JSON body, or the query string."""
+    try:
+        form = await request.form
+    except Exception:
+        form = {}
+    repo = (form.get("repo") or "").strip()
+    ref = (form.get("ref") or "").strip()
+    if not (repo and ref):
+        data = await request.get_json(silent=True)
+        if isinstance(data, dict):
+            repo = repo or str(data.get("repo") or "").strip()
+            ref = ref or str(data.get("ref") or "").strip()
+    if not repo:
+        repo = (request.args.get("repo") or "").strip()
+    if not ref:
+        ref = (request.args.get("ref") or "").strip()
+    return repo, ref
 
-    Designed as a "let's debug this" link for app error pages: another openhost
-    app can point a user here with the repo + commit that produced a 500, and
-    they land in a terminal sitting in a fresh checkout (optionally with Claude
-    already started on the failure).
+
+@app.post("/open-workspace")
+async def open_workspace() -> object:
+    """Provider for the open-workspace service (services/open-workspace/openapi.yaml).
+
+    Given a `repo` clone URL and a `ref`, prepare a checkout of that repo at that
+    commit and 303-redirect the user into a terminal sitting in it. Inputs may
+    arrive as form fields, a JSON body, or query params; both are required.
     """
-    repo = (request.args.get("repo") or "").strip()
-    ref = (request.args.get("sha") or request.args.get("ref") or "").strip()
-    prompt = (request.args.get("prompt") or "").strip()
-    context = (request.args.get("context") or "").strip()
+    repo, ref = await _read_repo_ref()
 
+    if not repo:
+        return jsonify({"error": "bad_request", "message": "repo is required"}), 400
     if not _REPO_RE.match(repo):
-        return jsonify({"error": "valid http(s)/ssh repo url required"}), 400
-    if ref and not _REF_RE.match(ref):
-        return jsonify({"error": "invalid sha/ref"}), 400
+        return jsonify({"error": "bad_request", "message": "repo must be an http(s)/ssh/git@ clone url"}), 400
+    if not ref:
+        return jsonify({"error": "bad_request", "message": "ref is required"}), 400
+    if not _REF_RE.match(ref):
+        return jsonify({"error": "bad_request", "message": "ref contains invalid characters"}), 400
 
-    seed_parts: list[str] = []
-    if context:
-        seed_parts.append(f"# Context\n\n{context}")
-    if prompt:
-        seed_parts.append(prompt)
-    claude_prompt = "\n\n".join(seed_parts)
+    access = await _resolve_access(repo, ref)
+    if access.decision == "forbidden":
+        return jsonify({"error": "access_denied", "message": "no authorization to access this repository"}), 403
+    if access.decision == "not_found":
+        return jsonify({"error": "not_found", "message": "repository or ref not found"}), 404
+    if access.decision == "error":
+        return jsonify({"error": "internal_error", "message": "could not reach the repository"}), 500
 
     sid = secrets.token_urlsafe(8)
+    env = {
+        "WORKSPACE_REPO": repo,
+        "WORKSPACE_DIR": _repo_dir_name(repo),
+        "WORKSPACE_REF": ref,
+    }
+    if access.token:
+        env["WORKSPACE_GITHUB_TOKEN"] = access.token
     _pending[sid] = PendingSession(
-        command=["bash", "-l", str(_DEBUG_SCRIPT)],
+        command=["bash", "-l", str(_WORKSPACE_SCRIPT)],
         cwd=str(HOME),
-        env={
-            "DEBUG_REPO": repo,
-            "DEBUG_DIR": _repo_dir_name(repo),
-            "DEBUG_REF": ref,
-            "DEBUG_PROMPT": claude_prompt,
-        },
+        env=env,
     )
-    return redirect(f"/?session={sid}")
+    return redirect(f"/?session={sid}", code=303)
 
 
 @app.websocket("/terminal/ws")

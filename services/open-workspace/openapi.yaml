@@ -1,0 +1,150 @@
+openapi: 3.0.3
+info:
+  title: OpenHost Open-Workspace Service
+  description: |
+    Open a working environment for a git repository at a specific ref.
+
+    **Service URL:** `github.com/imbue-openhost/claude-code-container/services/open-workspace`
+
+    The idea is deliberately small and implementation-neutral: *"here is a
+    repository at a commit — send me to a place where a person can work on
+    it."* A provider receives a repository clone URL and a ref, prepares a
+    working environment for that exact code, and **redirects** the user to it.
+
+    What the working environment actually is is entirely the provider's
+    choice; the contract says nothing about it. Because the response is a
+    redirect, the provider at the redirect target owns the whole experience,
+    and any provider (or any caller) can be swapped without the other side
+    changing.
+
+    ## Inputs
+
+    Exactly two inputs, both **required**:
+
+    - `repo` — a git clone URL identifying the repository.
+    - `ref` — a git commit, tag, or branch identifying the exact code to open.
+
+    There is intentionally no `prompt`, no freeform `context`, and no
+    provider-specific argument bag in this version. The exact commit matters,
+    so `ref` is required, not optional.
+
+    ## Invocation
+
+    The endpoint is an HTTP `POST` — opening a workspace may create a resource
+    (e.g. a checkout) as a side effect. On success it returns a `3xx` redirect
+    whose `Location` is the workspace URL; it does **not** return the URL in a
+    response body. A caller therefore points a user (a browser, or a link in
+    another app's page) at the endpoint, and the user lands in the workspace.
+
+    Inputs may be supplied either as an `application/x-www-form-urlencoded`
+    form body (natural for a browser form `POST`) or as an `application/json`
+    body. A provider may also accept them as query-string parameters.
+
+    ## Authorization
+
+    A provider may need authorization to reach a private repository. How it
+    obtains that (for example, an OAuth grant brokered by the openhost `oauth`
+    service) is a provider concern and is not part of this contract — the
+    caller always passes only `repo` and `ref`.
+  version: 0.1.0
+
+paths:
+  /:
+    post:
+      summary: Open a workspace for a repository at a ref
+      description: |
+        Prepare a working environment for `repo` at `ref` and redirect the
+        user to it.
+
+        On success the response is a `3xx` redirect (`303 See Other` is
+        recommended for a `POST`) whose `Location` header is the workspace
+        URL. The workspace URL is **not** returned in a response body.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/OpenWorkspaceRequest"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpenWorkspaceRequest"
+      responses:
+        "303":
+          description: |
+            Workspace ready. The `Location` header carries the workspace URL.
+            Any `3xx` status with a `Location` header satisfies the contract;
+            `303 See Other` is recommended so that a browser following a
+            `POST` issues a `GET` for the workspace URL.
+          headers:
+            Location:
+              required: true
+              description: The workspace URL the user should be sent to.
+              schema:
+                type: string
+                format: uri
+        "400":
+          description: |
+            A required input is missing or malformed — for example an absent
+            `repo` or `ref`, a `repo` whose transport is not permitted, or a
+            `ref` that fails validation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: |
+            Access denied. The repository exists but the provider has no or
+            insufficient authorization to reach it (for example, a private
+            repository for which no authorization has been granted). This
+            status MUST be distinguishable from `404`: "exists but not
+            allowed" versus "does not exist".
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: The requested `repo` or `ref` does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: |
+            An internal/provider error unrelated to the validity of the
+            request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+components:
+  schemas:
+    OpenWorkspaceRequest:
+      type: object
+      required: [repo, ref]
+      properties:
+        repo:
+          type: string
+          minLength: 1
+          description: |
+            A git clone URL identifying the repository. Only transports that
+            cannot execute arbitrary commands are permitted: `https://`,
+            `http://`, `ssh://`, and `git@…` style URLs. Command-capable
+            transports such as `ext::` and `file://` are rejected.
+          example: "https://github.com/octocat/Hello-World.git"
+        ref:
+          type: string
+          minLength: 1
+          description: |
+            A git commit, tag, or branch identifying the exact code to open.
+            Values that could be interpreted as command flags or that contain
+            unsafe characters are rejected.
+          example: "a1b2c3d"
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        message:
+          type: string

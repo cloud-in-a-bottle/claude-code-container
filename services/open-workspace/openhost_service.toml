@@ -1,0 +1,3 @@
+[service]
+name = "open-workspace"
+description = "Open a working environment for a repository at a specific commit"
