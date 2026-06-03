@@ -204,9 +204,6 @@ def _pop_pending(sid: str | None) -> PendingSession | None:
         return None
     return session
 
-# Restrict clone URLs to http(s)/ssh transports so a caller can't smuggle in a
-# `ext::`/`file::` transport (which would let git run arbitrary commands).
-_REPO_RE = re.compile(r"^(https?://|ssh://|git@)[^\s]+$")
 # A git ref/sha: no leading dash (would be read as a `git checkout` flag) and a
 # conservative character set.
 _REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
@@ -268,6 +265,30 @@ def _git_host(url: str) -> str:
     if scp:
         return scp.group(1).lower()
     return (urllib.parse.urlparse(url).hostname or "").lower()
+
+
+def _validate_repo_url(url: str) -> bool:
+    """Accept http(s)/ssh URLs and scp-form (`user@host:path`) clone URLs.
+
+    Reject anything else — notably command-capable transports like `ext::` and
+    `file://`, and inputs that aren't URLs at all — so a caller can't smuggle
+    in a transport that lets git execute arbitrary commands.
+
+    Parses with `urllib`/`_git_host` rather than a single anchored regex so the
+    structure (scheme, host) is what gets verified rather than just the prefix.
+    """
+    if not url or any(c.isspace() for c in url):
+        return False
+    # `_git_host` returns "" when neither the scp form nor `urllib` finds a
+    # host, which rules out bare paths and malformed inputs.
+    if not _git_host(url):
+        return False
+    # URL form: restrict the transport. scp form (no `://`) has no scheme to
+    # check and is accepted as-is — git's own ssh client runs the command.
+    if "://" in url:
+        if urllib.parse.urlparse(url).scheme not in ("http", "https", "ssh"):
+            return False
+    return True
 
 
 def _is_github(url: str) -> bool:
@@ -428,7 +449,7 @@ async def open_workspace() -> object:
 
     if not repo:
         return jsonify({"error": "bad_request", "message": "repo is required"}), 400
-    if not _REPO_RE.match(repo):
+    if not _validate_repo_url(repo):
         return jsonify({"error": "bad_request", "message": "repo must be an http(s)/ssh/git@ clone url"}), 400
     if not ref:
         return jsonify({"error": "bad_request", "message": "ref is required"}), 400
@@ -582,10 +603,12 @@ async def _serve() -> None:
     cfg = hypercorn.config.Config()
     cfg.bind = ["0.0.0.0:5000"]
     cfg.accesslog = "-"
-    # `_pending` is in-process state shared between the POST that queues a
-    # session and the WS that claims it. Multiple workers would split that
-    # state across processes; keep it single-worker.
-    cfg.workers = 1
+    # `hypercorn.asyncio.serve` ignores `cfg.workers` and always runs a single
+    # worker, which is what we need: `_pending` is in-process state shared
+    # between the POST that queues a session and the WS that claims it, and
+    # multiple workers would split that state across processes. If we ever
+    # switch to a multi-worker entrypoint, `_pending` needs to move behind a
+    # shared store (redis, sqlite, etc) first.
     await hypercorn.asyncio.serve(app, cfg)
 
 

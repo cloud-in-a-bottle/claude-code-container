@@ -319,6 +319,25 @@ def test_inject_github_token_preserves_host_under_unsafe_input(token):
     assert parsed.path == "/o/r.git"
 
 
+@pytest.mark.parametrize(
+    "token, expected",
+    [
+        # Happy path with a port — the port must survive the netloc rewrite.
+        ("ghs_AbCd1234", "https://ghs_AbCd1234@github.com:8443/o/r.git"),
+        # `@` in the token would otherwise shift the port (and the host) out
+        # from under us — verify the same encoding holds here.
+        ("evil@attacker.com", "https://evil%40attacker.com@github.com:8443/o/r.git"),
+        # `:` in the token would otherwise look like the user:port separator
+        # and re-anchor the port.
+        ("foo:bar", "https://foo%3Abar@github.com:8443/o/r.git"),
+    ],
+)
+def test_inject_github_token_preserves_port(token, expected):
+    """Explicit-port URLs must round-trip with the port intact, including under
+    unsafe token shapes that target the port/host boundary."""
+    assert server._inject_github_token("https://github.com:8443/o/r.git", token) == expected
+
+
 def test_inject_github_token_empty_token_still_safe():
     # An empty token shouldn't reach `_inject_github_token` (the caller checks
     # first), but if it ever did, the URL must remain syntactically valid.
