@@ -29,7 +29,7 @@ import tomli_w
 from quart import Quart, jsonify, request, send_from_directory, websocket
 
 APP_DIR = Path(__file__).parent
-HOME = Path(os.environ.get("HOME", "/root"))
+HOME = Path(os.environ.get("HOME", "/home/workbench"))
 OPENHOST_DIR = Path(os.environ.get("OPENHOST_DIR", str(HOME / "openhost")))
 
 ROUTER_URL = os.environ.get("OPENHOST_ROUTER_URL", "")
