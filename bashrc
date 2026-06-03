@@ -33,19 +33,18 @@ alias l='ls -CF'
 alias claude='claude --dangerously-skip-permissions'
 
 # Interactive login banner: prompt to configure the `oh` CLI if no config
-# exists yet. The workbench tries to seed this file from secrets-v2 on
-# startup (keys: OH_HOSTNAME, OH_TOKEN); if those weren't set, fall back to
-# nudging the user.
+# exists yet. The workbench tries to seed this file on startup using the
+# OPENHOST_ZONE_DOMAIN env var for the hostname and the OH_TOKEN secret from
+# secrets-v2; if the token isn't set, fall back to nudging the user.
 if [[ $- == *i* ]] && [ ! -f "$HOME/.openhost/compute_space_cli.toml" ]; then
     cat <<'EOF'
 ────────────────────────────────────────────────────────────────
   The `oh` openhost CLI is installed but not configured.
 
-  To auto-configure on next start, set these secrets in the
+  To auto-configure on next start, set this secret in the
   secrets app, then restart this workbench:
 
-      OH_HOSTNAME   your compute space host (e.g. x.host.com)
-      OH_TOKEN      an API token for that instance
+      OH_TOKEN   an API token for this compute space
 
   Or configure it interactively now:
 

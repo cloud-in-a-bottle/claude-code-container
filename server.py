@@ -69,21 +69,23 @@ async def _fetch_anthropic_key() -> str:
 
 
 async def _seed_oh_config() -> None:
-    """Best-effort: write ~/.openhost/compute_space_cli.toml from secrets.
+    """Best-effort: write ~/.openhost/compute_space_cli.toml from env + secrets.
 
-    If both OH_HOSTNAME and OH_TOKEN are available in secrets-v2, write a config
-    so the `oh` CLI is usable without `oh instance login`. If the config file
-    already exists (user configured manually), don't overwrite it.
+    Hostname comes from OPENHOST_ZONE_DOMAIN, which openhost injects into every
+    app's env. The user-bound API token isn't auto-provided, so we fetch
+    OH_TOKEN from secrets-v2. If the config file already exists (user
+    configured manually), don't overwrite it.
     """
     cfg_path = HOME / ".openhost" / "compute_space_cli.toml"
     if cfg_path.exists():
         return
-    secrets_data = await _fetch_secrets(["OH_HOSTNAME", "OH_TOKEN"])
-    hostname = secrets_data.get("OH_HOSTNAME", "").strip()
-    token = secrets_data.get("OH_TOKEN", "").strip()
-    if not hostname or not token:
+    hostname = os.environ.get("OPENHOST_ZONE_DOMAIN", "").strip()
+    if not hostname:
         return
-    # Strip any protocol/path the user may have stored.
+    token = (await _fetch_secrets(["OH_TOKEN"])).get("OH_TOKEN", "").strip()
+    if not token:
+        return
+    # Strip any protocol/path in case the zone domain is ever stored with one.
     hostname = hostname.replace("https://", "").replace("http://", "").rstrip("/")
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
     cfg_path.write_text(

@@ -23,6 +23,5 @@ shortname = "secrets"
 version = ">=0.1.0"
 grants = [
     {key = "ANTHROPIC_API_KEY"},
-    {key = "OH_HOSTNAME"},
     {key = "OH_TOKEN"},
 ]
