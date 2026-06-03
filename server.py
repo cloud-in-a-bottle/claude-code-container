@@ -159,7 +159,50 @@ class PendingSession:
     env: dict[str, str] = field(default_factory=dict)
 
 
-_pending: dict[str, PendingSession] = {}
+# Sessions that have been queued by /open-workspace or /api/sessions but not yet
+# attached to a websocket. Each entry is (session, expires_at_monotonic).
+#
+# IMPORTANT: this dict is process-local and not synchronized across workers, so
+# the hypercorn config below must keep workers=1 — otherwise a POST hits one
+# worker, the WS hits another, and the pending session silently falls through
+# to the default `bash -l`. If we ever need to scale out, this needs to move
+# behind a shared store (redis, sqlite, etc).
+_pending: dict[str, tuple[PendingSession, float]] = {}
+# How long a queued session waits for its websocket before we drop it. The
+# normal flow attaches within a second or two; a tab closed before the redirect
+# completes, a script that POSTs without following the 303, or a buggy client
+# would otherwise grow this dict without bound.
+_PENDING_TTL_SECONDS = 600.0
+
+
+def _sweep_pending(now: float | None = None) -> None:
+    """Drop expired entries from `_pending`. Called on every insert so the dict
+    is bounded by concurrent in-flight sessions, not by historical traffic."""
+    if now is None:
+        now = asyncio.get_event_loop().time()
+    expired = [sid for sid, (_, exp) in _pending.items() if exp <= now]
+    for sid in expired:
+        _pending.pop(sid, None)
+
+
+def _put_pending(sid: str, session: PendingSession) -> None:
+    """Queue a session, sweeping expired entries first."""
+    now = asyncio.get_event_loop().time()
+    _sweep_pending(now)
+    _pending[sid] = (session, now + _PENDING_TTL_SECONDS)
+
+
+def _pop_pending(sid: str | None) -> PendingSession | None:
+    """Claim a queued session if it exists and hasn't expired."""
+    if not sid:
+        return None
+    entry = _pending.pop(sid, None)
+    if entry is None:
+        return None
+    session, expires_at = entry
+    if expires_at <= asyncio.get_event_loop().time():
+        return None
+    return session
 
 # Restrict clone URLs to http(s)/ssh transports so a caller can't smuggle in a
 # `ext::`/`file::` transport (which would let git run arbitrary commands).
@@ -235,11 +278,18 @@ def _is_github(url: str) -> bool:
 def _inject_github_token(url: str, token: str) -> str:
     """Put a token into an http(s) URL's authority for a one-shot authenticated
     git operation. Matches openhost's `inject_github_token_in_url`. Non-http
-    transports (ssh) are returned unchanged — the token can't be applied."""
+    transports (ssh) are returned unchanged — the token can't be applied.
+
+    The token is percent-encoded so values containing `:`/`@`/`/`/`%` don't
+    corrupt the URL's authority section. GitHub tokens today are
+    `[A-Za-z0-9_]` and pass through unchanged, but encoding here keeps us
+    safe against future token formats and against a malformed value supplied
+    by a misconfigured oauth provider."""
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme in ("http", "https") and parsed.hostname:
         host = parsed.hostname + (f":{parsed.port}" if parsed.port else "")
-        return parsed._replace(netloc=f"{token}@{host}").geturl()
+        encoded = urllib.parse.quote(token, safe="")
+        return parsed._replace(netloc=f"{encoded}@{host}").geturl()
     return url
 
 
@@ -335,10 +385,13 @@ async def create_session() -> object:
     seed = "\n\n".join(seed_parts) + "\n"
 
     sid = secrets.token_urlsafe(8)
-    _pending[sid] = PendingSession(
-        command=["claude", "--dangerously-skip-permissions"],
-        stdin_seed=seed,
-        cwd=str(OPENHOST_DIR if OPENHOST_DIR.exists() else HOME),
+    _put_pending(
+        sid,
+        PendingSession(
+            command=["claude", "--dangerously-skip-permissions"],
+            stdin_seed=seed,
+            cwd=str(OPENHOST_DIR if OPENHOST_DIR.exists() else HOME),
+        ),
     )
     return jsonify({"id": sid, "url": f"/?session={sid}"})
 
@@ -398,10 +451,13 @@ async def open_workspace() -> object:
     }
     if access.token:
         env["WORKSPACE_GITHUB_TOKEN"] = access.token
-    _pending[sid] = PendingSession(
-        command=["bash", "-l", str(_WORKSPACE_SCRIPT)],
-        cwd=str(HOME),
-        env=env,
+    _put_pending(
+        sid,
+        PendingSession(
+            command=["bash", "-l", str(_WORKSPACE_SCRIPT)],
+            cwd=str(HOME),
+            env=env,
+        ),
     )
     return redirect(f"/?session={sid}", code=303)
 
@@ -409,7 +465,7 @@ async def open_workspace() -> object:
 @app.websocket("/terminal/ws")
 async def terminal_ws() -> None:
     session_id = websocket.args.get("session")
-    pending = _pending.pop(session_id, None) if session_id else None
+    pending = _pop_pending(session_id)
 
     if pending is not None:
         command = pending.command
@@ -526,6 +582,10 @@ async def _serve() -> None:
     cfg = hypercorn.config.Config()
     cfg.bind = ["0.0.0.0:5000"]
     cfg.accesslog = "-"
+    # `_pending` is in-process state shared between the POST that queues a
+    # session and the WS that claims it. Multiple workers would split that
+    # state across processes; keep it single-worker.
+    cfg.workers = 1
     await hypercorn.asyncio.serve(app, cfg)
 
 

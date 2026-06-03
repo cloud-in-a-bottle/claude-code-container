@@ -10,6 +10,7 @@ stubbing `_resolve_access` itself.
 from __future__ import annotations
 
 import asyncio
+import urllib.parse
 
 import pytest
 
@@ -240,16 +241,21 @@ def test_internal_error_is_500(monkeypatch):
     assert resp.status_code == 500
 
 
+def _only_pending() -> server.PendingSession:
+    """Assert there is exactly one queued session and return it (unwrapping
+    the (session, expires_at) tuple in `_pending`)."""
+    assert len(server._pending) == 1
+    sid = next(iter(server._pending))
+    return server._pending[sid][0]
+
+
 def test_success_redirects_303_with_location(monkeypatch):
     server._pending.clear()
     _stub_access(monkeypatch, "ok")
     resp = _post(form={"repo": "https://github.com/o/r.git", "ref": "main"})
     assert resp.status_code == 303
     assert resp.headers["Location"].startswith("/?session=")
-    # A pending session was queued for the PTY to pick up.
-    assert len(server._pending) == 1
-    sid = next(iter(server._pending))
-    pending = server._pending[sid]
+    pending = _only_pending()
     assert pending.env["WORKSPACE_REPO"] == "https://github.com/o/r.git"
     assert pending.env["WORKSPACE_REF"] == "main"
     assert pending.env["WORKSPACE_DIR"] == "r"
@@ -261,8 +267,111 @@ def test_success_passes_token_to_pending(monkeypatch):
     _stub_access(monkeypatch, "ok", token="ghs_secret")
     resp = _post(form={"repo": "https://github.com/o/private.git", "ref": "abc1234"})
     assert resp.status_code == 303
-    sid = next(iter(server._pending))
-    assert server._pending[sid].env["WORKSPACE_GITHUB_TOKEN"] == "ghs_secret"
+    assert _only_pending().env["WORKSPACE_GITHUB_TOKEN"] == "ghs_secret"
+
+
+# ── token URL injection: malformed/invalid token shapes ──────────────────────
+#
+# GitHub tokens today are `[A-Za-z0-9_]`, but the oauth provider is external —
+# we can't statically guarantee what it returns. These tests pin that no
+# adversarial or accidentally-malformed token can corrupt the URL or splice
+# extra hosts/credentials into the authority section.
+
+
+@pytest.mark.parametrize(
+    "token, expected",
+    [
+        # The happy path: a real GitHub token shape passes through unchanged
+        # (underscore is unreserved per RFC 3986, no encoding needed).
+        ("ghs_AbCd1234", "https://ghs_AbCd1234@github.com/o/r.git"),
+        # `@` in the token would otherwise let the value re-anchor the URL's
+        # authority and point git at an attacker-chosen host.
+        ("evil@attacker.com", "https://evil%40attacker.com@github.com/o/r.git"),
+        # `:` would otherwise be parsed as a user:password separator.
+        ("foo:bar", "https://foo%3Abar@github.com/o/r.git"),
+        # `/` would otherwise terminate the authority section and shift the
+        # rest of the token into the path, silently changing the repo path.
+        ("a/b", "https://a%2Fb@github.com/o/r.git"),
+        # `%` is the encoding sigil — must itself be encoded so a literal
+        # `%` in the token isn't re-decoded as something else.
+        ("pct%20", "https://pct%2520@github.com/o/r.git"),
+        # Spaces and other whitespace must be encoded — a raw space in the URL
+        # would make git reject the URL outright.
+        ("a b", "https://a%20b@github.com/o/r.git"),
+        # Newline: a non-encoding implementation could log/leak the URL with a
+        # line break embedded in the credential. Belt-and-suspenders.
+        ("a\nb", "https://a%0Ab@github.com/o/r.git"),
+    ],
+)
+def test_inject_github_token_encodes_unsafe_chars(token, expected):
+    assert server._inject_github_token("https://github.com/o/r.git", token) == expected
+
+
+@pytest.mark.parametrize(
+    "token",
+    ["evil@attacker.com", "foo:bar", "a/b", "pct%20", "a b", "a\nb"],
+)
+def test_inject_github_token_preserves_host_under_unsafe_input(token):
+    """No token shape may shift the URL's host away from github.com."""
+    out = server._inject_github_token("https://github.com/o/r.git", token)
+    parsed = urllib.parse.urlparse(out)
+    assert parsed.hostname == "github.com"
+    assert parsed.path == "/o/r.git"
+
+
+def test_inject_github_token_empty_token_still_safe():
+    # An empty token shouldn't reach `_inject_github_token` (the caller checks
+    # first), but if it ever did, the URL must remain syntactically valid.
+    out = server._inject_github_token("https://github.com/o/r.git", "")
+    parsed = urllib.parse.urlparse(out)
+    assert parsed.hostname == "github.com"
+
+
+# ── pending-session TTL & sweep ──────────────────────────────────────────────
+
+
+def test_pending_sweep_drops_expired(monkeypatch):
+    server._pending.clear()
+    # Freeze time so we can advance it deterministically.
+    now = [1000.0]
+
+    class FakeLoop:
+        def time(self):
+            return now[0]
+
+    monkeypatch.setattr(server.asyncio, "get_event_loop", lambda: FakeLoop())
+
+    server._put_pending("old", server.PendingSession(command=["true"]))
+    assert "old" in server._pending
+
+    now[0] += server._PENDING_TTL_SECONDS + 1
+    # Inserting a fresh entry sweeps the old one.
+    server._put_pending("new", server.PendingSession(command=["true"]))
+    assert "old" not in server._pending
+    assert "new" in server._pending
+
+
+def test_pop_pending_returns_none_for_expired(monkeypatch):
+    server._pending.clear()
+    now = [1000.0]
+
+    class FakeLoop:
+        def time(self):
+            return now[0]
+
+    monkeypatch.setattr(server.asyncio, "get_event_loop", lambda: FakeLoop())
+
+    server._put_pending("sid", server.PendingSession(command=["true"]))
+    now[0] += server._PENDING_TTL_SECONDS + 1
+    # An attached websocket arriving after the TTL must not pick up a stale
+    # session — it should fall through to the default shell instead.
+    assert server._pop_pending("sid") is None
+
+
+def test_pop_pending_unknown_returns_none():
+    server._pending.clear()
+    assert server._pop_pending("does-not-exist") is None
+    assert server._pop_pending(None) is None
 
 
 def test_accepts_json_body(monkeypatch):

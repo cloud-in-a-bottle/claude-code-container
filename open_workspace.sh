@@ -23,12 +23,20 @@
 CLEAN_URL="$WORKSPACE_REPO"
 # Build a token-authenticated URL for http(s) repos when we have a token; for
 # ssh/git@ transports the token can't be applied, so it stays the clean URL.
+# We percent-encode the token before splicing it into the URL's authority so a
+# token containing `:`/`@`/`/`/`%` can't corrupt the URL — server.py applies
+# the same encoding for the probe path; the two must stay in sync.
 AUTHED_URL="$CLEAN_URL"
 if [ -n "${WORKSPACE_GITHUB_TOKEN:-}" ]; then
+    ENCODED_TOKEN="$(
+        python3 -c 'import sys, urllib.parse; sys.stdout.write(urllib.parse.quote(sys.argv[1], safe=""))' \
+            "$WORKSPACE_GITHUB_TOKEN"
+    )"
     case "$CLEAN_URL" in
-        https://*) AUTHED_URL="https://${WORKSPACE_GITHUB_TOKEN}@${CLEAN_URL#https://}" ;;
-        http://*)  AUTHED_URL="http://${WORKSPACE_GITHUB_TOKEN}@${CLEAN_URL#http://}" ;;
+        https://*) AUTHED_URL="https://${ENCODED_TOKEN}@${CLEAN_URL#https://}" ;;
+        http://*)  AUTHED_URL="http://${ENCODED_TOKEN}@${CLEAN_URL#http://}" ;;
     esac
+    unset ENCODED_TOKEN
 fi
 # AUTHED_URL is a plain (non-exported) shell var; once we've captured it the
 # token env var is no longer needed, so drop it before any `exec bash` so it
