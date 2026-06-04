@@ -47,17 +47,17 @@ ENV PATH="/opt/venv/bin:$PATH"
 # natively, but uv still manages the tool's isolated environment cleanly.
 RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 
-# Non-root user — `claude --dangerously-skip-permissions` refuses to run as
-# root. Ubuntu 24.04 ships a uid 1000 user ("ubuntu"); rename it to workbench.
-#
-# We intentionally don't install sudo for this user: openhost launches
-# workbench containers with --security-opt=no-new-privileges, which blocks
-# sudo from elevating anyway. Anything that needs root has to be baked into
-# this Dockerfile.
-RUN usermod -l workbench -d /home/workbench -m ubuntu \
-    && groupmod -n workbench ubuntu \
-    && chsh -s /bin/bash workbench
-ENV HOME=/home/workbench
+# Run as root inside the container. openhost launches workbench containers
+# under rootless podman with --cap-drop=ALL and --security-opt=no-new-privileges,
+# so "root" inside is still mapped to an unprivileged host user and can't escape
+# the container — but it lets `apt-get install` and friends work at runtime
+# without sudo (which no_new_privs blocks anyway).
+ENV HOME=/root
+
+# Claude Code refuses --dangerously-skip-permissions when uid == 0 unless it
+# believes it's already sandboxed. We are (rootless podman, no_new_privs,
+# cap-drop=ALL), so tell it so.
+ENV IS_SANDBOX=1
 
 WORKDIR /app
 COPY server.py /app/server.py
@@ -66,20 +66,17 @@ COPY templates /app/templates
 COPY static /app/static
 COPY skills /app/skills
 COPY entrypoint.sh /app/entrypoint.sh
-COPY bashrc /home/workbench/.bashrc
-COPY bash_profile /home/workbench/.bash_profile
-RUN chmod +x /app/entrypoint.sh \
-    && chown -R workbench:workbench /app \
-    && chown workbench:workbench /home/workbench/.bashrc /home/workbench/.bash_profile
+COPY bashrc /root/.bashrc
+COPY bash_profile /root/.bash_profile
+RUN chmod +x /app/entrypoint.sh
 
-USER workbench
-WORKDIR /home/workbench
+WORKDIR /root
 
-# Install the `oh` openhost CLI as the workbench user. uv fetches Python 3.12
-# automatically (the CLI requires it).
+# Install the `oh` openhost CLI. uv fetches Python 3.12 automatically
+# (the CLI requires it).
 # TODO: pin to a tag/SHA once openhost exposes a release we can resolve at
 # build time; today this tracks the default branch and is non-reproducible.
-ENV PATH="/home/workbench/.local/bin:$PATH"
+ENV PATH="/root/.local/bin:$PATH"
 RUN uv tool install "oh @ git+https://github.com/imbue-openhost/openhost.git#subdirectory=compute_space_cli"
 
 EXPOSE 5000

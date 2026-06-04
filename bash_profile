@@ -7,7 +7,7 @@
 # and drops the additions baked in via Dockerfile `ENV PATH=...`. Re-add
 # the workbench paths here so `oh` (~/.local/bin) and the Python venv
 # (/opt/venv/bin) are reachable in every new tab.
-for d in "$HOME/.local/bin" /opt/venv/bin; do
+for d in "$HOME/.local/bin" /opt/venv/bin /usr/sbin /sbin; do
     case ":$PATH:" in
         *":$d:"*) ;;
         *) PATH="$d:$PATH" ;;
