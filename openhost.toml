@@ -22,6 +22,13 @@ service = "github.com/imbue-openhost/claude-code-container/services/open-workspa
 version = "0.1.0"
 endpoint = "/open-workspace"
 
+# Persistent home directory survives redeploys, so `claude login`, the openhost
+# clone, shell history, etc. all stick around across updates. Mounted at
+# /data/app_data/claude-workbench (env: OPENHOST_APP_DATA_DIR); entrypoint.sh
+# repoints HOME there.
+[data]
+app_data = true
+
 # Pull ANTHROPIC_API_KEY from the secrets app if it's installed. The fetch is
 # best-effort — if secrets-v2 isn't around or the key isn't set, the terminal
 # still works and the user can `claude login` or export the key by hand.

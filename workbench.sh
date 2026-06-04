@@ -1,12 +1,35 @@
-# ~/.bashrc for the claude-workbench user.
+# Site config for the claude-workbench. Installed at /etc/profile.d/workbench.sh
+# so login shells (`bash -l`) pick it up via /etc/profile, and sourced from the
+# bottom of /etc/bash.bashrc (a one-line `source` is appended in the Dockerfile)
+# so non-login interactive bash gets it too. The guard below makes the
+# double-include safe: Ubuntu's /etc/profile sources /etc/bash.bashrc before
+# /etc/profile.d, so on a login shell this file is reached twice.
 #
-# Don't source /etc/bash.bashrc here: bash auto-loads it for interactive
-# non-login shells, and /etc/profile loads it for login shells. Sourcing
-# it again from .bashrc caused Ubuntu's sudo motd to print twice.
+# Living here instead of $HOME/.bashrc means image updates flow through cleanly
+# without clobbering anything the user wrote in their own dotfiles.
 
-# Colored prompt + ls/grep aliases. Ubuntu's default /etc/skel/.bashrc sets
-# these up, but we ship our own .bashrc that replaces skel's, so we have to
-# re-enable them here. server.py exports TERM=xterm-256color for the pty.
+if [ -n "${_WORKBENCH_RC_LOADED:-}" ]; then
+    return
+fi
+_WORKBENCH_RC_LOADED=1
+
+# `bash -l` sources /etc/profile, which resets PATH to the system default and
+# drops the additions baked in via Dockerfile `ENV PATH=...`. Re-add the
+# workbench paths so `oh` (~/.local/bin) and the Python venv (/opt/venv/bin)
+# are reachable in every new tab.
+for d in "$HOME/.local/bin" /opt/venv/bin /usr/sbin /sbin; do
+    case ":$PATH:" in
+        *":$d:"*) ;;
+        *) PATH="$d:$PATH" ;;
+    esac
+done
+export PATH
+
+# Everything below is interactive-only.
+case $- in *i*) ;; *) return;; esac
+
+# Colored prompt + ls/grep aliases. server.py exports TERM=xterm-256color
+# for the pty.
 case "$TERM" in
     xterm-color|*-256color) color_prompt=yes;;
 esac
@@ -36,7 +59,7 @@ alias claude='claude --dangerously-skip-permissions'
 # exists yet. The workbench tries to seed this file on startup using the
 # OPENHOST_ZONE_DOMAIN env var for the hostname and the OH_TOKEN secret from
 # secrets-v2; if the token isn't set, fall back to nudging the user.
-if [[ $- == *i* ]] && [ ! -f "$HOME/.openhost/compute_space_cli.toml" ]; then
+if [ ! -f "$HOME/.openhost/compute_space_cli.toml" ]; then
     cat <<'EOF'
 ────────────────────────────────────────────────────────────────
   The `oh` openhost CLI is installed but not configured.

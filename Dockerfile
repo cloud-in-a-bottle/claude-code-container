@@ -66,9 +66,13 @@ COPY templates /app/templates
 COPY static /app/static
 COPY skills /app/skills
 COPY entrypoint.sh /app/entrypoint.sh
-COPY bashrc /root/.bashrc
-COPY bash_profile /root/.bash_profile
-RUN chmod +x /app/entrypoint.sh
+# Site rcfile: lives under /etc so $HOME (which we point at the persistent data
+# dir at runtime) stays untouched and user edits to ~/.bashrc/~/.bash_profile
+# survive image updates.
+COPY workbench.sh /etc/profile.d/workbench.sh
+RUN echo '[ -r /etc/profile.d/workbench.sh ] && . /etc/profile.d/workbench.sh' \
+        >> /etc/bash.bashrc \
+    && chmod +x /app/entrypoint.sh
 
 WORKDIR /root
 

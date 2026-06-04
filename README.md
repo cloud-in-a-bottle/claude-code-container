@@ -18,6 +18,14 @@ Authentication for `claude` is whatever the user sets up inside the
 terminal — either `ANTHROPIC_API_KEY` in the environment or an interactive
 `claude login`. The workbench doesn't manage that.
 
+`HOME` lives on the app's persistent data dir
+(`/data/app_data/claude-workbench/home`), so a `claude login`, the openhost
+clone, and shell history all survive container redeploys. The workbench's
+own prompt, aliases, and PATH fixups live at `/etc/profile.d/workbench.sh`
+(sourced by both login and non-login interactive bash), so `~/.bashrc` and
+`~/.bash_profile` are entirely yours — anything you write there sticks
+around and is never overwritten by image updates.
+
 As a convenience, if the `secrets-v2` app is installed and `ANTHROPIC_API_KEY`
 is set there, the workbench fetches it on first PTY launch and exports it
 into every new terminal's environment. This is best-effort — if the secrets
