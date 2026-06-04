@@ -405,6 +405,24 @@ def test_accepts_query_params(monkeypatch):
     assert resp.status_code == 303
 
 
+def test_accepts_get_with_query(monkeypatch):
+    # GET is supported as a workaround for the openhost router's 302→/login
+    # bounce, which demotes the eventual POST back to a GET. The same query
+    # params that work on POST must also work on GET.
+    _stub_access(monkeypatch, "ok")
+
+    async def go():
+        client = server.app.test_client()
+        return await client.get(
+            "/open-workspace",
+            query_string={"repo": "https://github.com/o/r.git", "ref": "main"},
+        )
+
+    resp = run(go())
+    assert resp.status_code == 303
+    assert resp.headers["Location"].startswith("/?session=")
+
+
 def test_debug_route_is_gone():
     async def go():
         client = server.app.test_client()

@@ -60,9 +60,17 @@ can satisfy it without any caller changing.
 
 ```
 POST /open-workspace          (form or JSON body, or query params)
+GET  /open-workspace          (query params)
   repo=<clone-url>&ref=<commit|tag|branch>
   -> 303 redirect to /?session=<token>
 ```
+
+GET is accepted in addition to the canonical POST as a workaround for the
+openhost router's login bounce: an unauthenticated POST gets `302`'d to
+`/login?next=…`, and a browser following that demotes the eventual return
+hop to GET (only HTTP `307`/`308` preserve method). Accepting GET means the
+post-login landing still resolves instead of `405`-ing. Once the router
+switches to method-preserving redirects this can go away.
 
 - `repo` (required) — an `https://`, `http://`, `ssh://`, or `git@…` clone
   URL. Other transports (e.g. `ext::`, `file://`) are rejected.

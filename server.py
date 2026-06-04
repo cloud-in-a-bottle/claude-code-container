@@ -8,9 +8,12 @@ Routes:
                                       body: {"prompt": "...", "context": "..."}
                                       the next WS that connects with ?session=<id> picks it up
     POST /open-workspace           -> open-workspace service provider: clone a repo at a
-                                      ref and 303-redirect into a checkout of it.
-                                      body (form or json): repo (required), ref (required)
+    GET  /open-workspace              ref and 303-redirect into a checkout of it.
+                                      body (form or json) or query: repo (required), ref (required)
                                       contract: services/open-workspace/openapi.yaml
+                                      (GET is a workaround for the openhost router's
+                                       login bounce demoting POST → GET; see the
+                                       open_workspace() docstring.)
 """
 
 from __future__ import annotations
@@ -437,13 +440,20 @@ async def _read_repo_ref() -> tuple[str, str]:
     return repo, ref
 
 
-@app.post("/open-workspace")
+@app.route("/open-workspace", methods=["GET", "POST"])
 async def open_workspace() -> object:
     """Provider for the open-workspace service (services/open-workspace/openapi.yaml).
 
     Given a `repo` clone URL and a `ref`, prepare a checkout of that repo at that
     commit and 303-redirect the user into a terminal sitting in it. Inputs may
     arrive as form fields, a JSON body, or query params; both are required.
+
+    The contract is POST-only, but we also accept GET as a workaround for the
+    openhost router's login bounce: an unauthenticated POST gets `302`'d to
+    `/login?next=…`, and a browser following that demotes the eventual return
+    hop to GET (per HTTP/1.1: only 307/308 preserve method). Accepting GET
+    means the post-login landing still resolves instead of 405-ing. Once the
+    router switches to 307/308 we can drop GET here.
     """
     repo, ref = await _read_repo_ref()
 
