@@ -40,6 +40,7 @@ from quart import Quart, jsonify, redirect, request, send_from_directory, websoc
 APP_DIR = Path(__file__).parent
 HOME = Path(os.environ.get("HOME", "/home/workbench"))
 OPENHOST_DIR = Path(os.environ.get("OPENHOST_DIR", str(HOME / "openhost")))
+MY_PROJECT_DIR = HOME / "my_project"
 
 ROUTER_URL = os.environ.get("OPENHOST_ROUTER_URL", "")
 APP_TOKEN = os.environ.get("OPENHOST_APP_TOKEN", "")
@@ -505,9 +506,9 @@ async def terminal_ws() -> None:
         stdin_seed = pending.stdin_seed
     else:
         command = ["bash", "-l"]
-        cwd = str(OPENHOST_DIR) if OPENHOST_DIR.exists() else str(HOME)
+        cwd = str(MY_PROJECT_DIR) if MY_PROJECT_DIR.exists() else str(HOME)
         extra_env = {}
-        stdin_seed = ""
+        stdin_seed = "claude\n"
 
     # Pre-populate ANTHROPIC_API_KEY from the secrets app if available and the
     # caller hasn't already set one.

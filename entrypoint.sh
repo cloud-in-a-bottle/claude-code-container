@@ -23,6 +23,15 @@ if [ ! -d "$OPENHOST_DIR/.git" ]; then
         echo "[entrypoint] WARN: openhost clone failed; you can clone manually later."
 fi
 
+APP_TEMPLATE_DIR="$HOME/app-template"
+if [ ! -d "$APP_TEMPLATE_DIR/.git" ]; then
+    echo "[entrypoint] cloning app-template into $APP_TEMPLATE_DIR ..."
+    git clone --depth 1 https://github.com/imbue-openhost/app-template.git "$APP_TEMPLATE_DIR" || \
+        echo "[entrypoint] WARN: app-template clone failed; you can clone manually later."
+fi
+
+mkdir -p "$HOME/my_project"
+
 mkdir -p "$(dirname "$SKILL_DST")"
 if [ ! -e "$SKILL_DST" ]; then
     ln -s "$SKILL_SRC" "$SKILL_DST"
