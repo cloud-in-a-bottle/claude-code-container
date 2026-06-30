@@ -1,6 +1,6 @@
 import asyncio
 
-from quart import Quart, jsonify, redirect, request, send_from_directory
+from quart import Quart, Response, jsonify, redirect, request, send_from_directory
 from quart.typing import ResponseReturnValue
 
 from config import APP_DIR, HOME, OPENHOST_DIR, PORT
@@ -9,6 +9,13 @@ from tabs import _tabs, create_server_tab, handle_terminal_ws, kick_tab, kill_ta
 from workspace import REF_RE, WORKSPACE_SCRIPT, repo_dir_name, resolve_access, validate_repo_url
 
 app = Quart(__name__, template_folder=str(APP_DIR / "templates"), static_folder=str(APP_DIR / "static"))
+
+
+@app.after_request
+async def no_cache_static(response: Response) -> Response:
+    if request.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return response
 
 
 @app.get("/health")

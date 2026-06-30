@@ -11,6 +11,16 @@
     return `${proto}://${location.host}/terminal/ws?tab=${encodeURIComponent(tabId)}`;
   }
 
+  function sendResize(entry) {
+    if (!entry.ws || entry.ws.readyState !== WebSocket.OPEN) return;
+    const d = entry.fit.proposeDimensions();
+    if (!d) return;
+    const json = new TextEncoder().encode(JSON.stringify({ type: 'resize', cols: d.cols, rows: d.rows }));
+    const buf = new Uint8Array(1 + json.length);
+    buf[0] = 0x01; buf.set(json, 1);
+    entry.ws.send(buf.buffer);
+  }
+
   function pollReconnect(entry) {
     setTimeout(async () => {
       if (!entry.reconnecting) return;
@@ -38,17 +48,7 @@
     ws.binaryType = 'arraybuffer';
     entry.ws = ws;
 
-    function sendResize() {
-      const d = entry.fit.proposeDimensions();
-      if (d && ws.readyState === WebSocket.OPEN) {
-        const json = new TextEncoder().encode(JSON.stringify({ type: 'resize', cols: d.cols, rows: d.rows }));
-        const buf = new Uint8Array(1 + json.length);
-        buf[0] = 0x01; buf.set(json, 1);
-        ws.send(buf.buffer);
-      }
-    }
-
-    ws.onopen = () => { entry.fit.fit(); sendResize(); };
+    ws.onopen = () => { if (activeEntry === entry) { entry.fit.fit(); sendResize(entry); } };
     ws.onmessage = (ev) => {
       if (!(ev.data instanceof ArrayBuffer)) { entry.term.write(ev.data); return; }
       const bytes = new Uint8Array(ev.data);
@@ -172,17 +172,13 @@
   }
 
   function activate(entry) {
-    // Disconnect the previously active tab so its lock is released for other clients.
-    if (activeEntry && activeEntry !== entry) disconnectTab(activeEntry);
     activeEntry = entry;
-
     for (const t of tabs) {
       t.tabEl.classList.toggle('active', t === entry);
       t.paneEl.classList.toggle('active', t === entry);
     }
-
     connectTab(entry);
-    setTimeout(() => { entry.fit.fit(); }, 0);
+    setTimeout(() => { entry.fit.fit(); sendResize(entry); }, 0);
   }
 
   function detachClientTab(entry) {
@@ -283,12 +279,14 @@
       await createNewServerTab();
     } else {
       for (const st of serverTabs) {
-        openClientTab(st.id, st.label, false); // create UI without connecting
+        openClientTab(st.id, st.label, false); // create UI without activating
       }
+      // Connect all tabs immediately so this client holds the lock on each one.
+      for (const t of tabs) connectTab(t);
       const toActivate = tabId
         ? (tabs.find(t => t.serverId === tabId) || tabs[0])
         : tabs[0];
-      activate(toActivate); // connect only the one tab that's actually visible
+      activate(toActivate); // make one tab visible
     }
   }
 
