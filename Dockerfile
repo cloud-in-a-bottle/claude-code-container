@@ -40,7 +40,7 @@ RUN npm install -g @anthropic-ai/claude-code
 
 # Python deps for the server.
 RUN python3 -m venv /opt/venv \
-    && /opt/venv/bin/pip install --no-cache-dir 'quart>=0.19' 'hypercorn>=0.16' 'httpx>=0.27' 'tomli-w>=1.0'
+    && /opt/venv/bin/pip install --no-cache-dir 'attrs>=22.2' 'quart>=0.19' 'hypercorn>=0.16' 'httpx>=0.27' 'tomli-w>=1.0'
 ENV PATH="/opt/venv/bin:$PATH"
 
 # uv — used to install the `oh` openhost CLI. Ubuntu 24.04 ships Python 3.12
@@ -60,6 +60,10 @@ ENV HOME=/root
 ENV IS_SANDBOX=1
 
 WORKDIR /app
+COPY config.py /app/config.py
+COPY remote_services.py /app/remote_services.py
+COPY tabs.py /app/tabs.py
+COPY workspace.py /app/workspace.py
 COPY server.py /app/server.py
 COPY open_workspace.sh /app/open_workspace.sh
 COPY templates /app/templates
