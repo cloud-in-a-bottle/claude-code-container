@@ -11,7 +11,26 @@
     return `${proto}://${location.host}/terminal/ws?tab=${encodeURIComponent(tabId)}`;
   }
 
+  function pollReconnect(entry) {
+    setTimeout(async () => {
+      if (!entry.reconnecting) return;
+      try {
+        const resp = await fetch('/api/tabs');
+        if (!resp.ok) { pollReconnect(entry); return; }
+        const serverTabs = await resp.json();
+        if (serverTabs.some(t => t.id === entry.serverId)) {
+          connectTab(entry); // tab still exists — network hiccup
+        } else {
+          location.reload(); // server restarted with new tabs
+        }
+      } catch (_) {
+        pollReconnect(entry); // server not ready yet
+      }
+    }, 2000);
+  }
+
   function connectTab(entry) {
+    entry.reconnecting = false;
     removeBusyOverlay(entry);
     if (entry.ws && (entry.ws.readyState === WebSocket.OPEN || entry.ws.readyState === WebSocket.CONNECTING)) return;
 
@@ -45,16 +64,23 @@
       }
     };
     ws.onclose = () => {
-      if (entry.ws !== ws) return; // stale handler — entry has since reconnected
-      if (!entry.busyOverlay) entry.term.write('\r\n\x1b[90m[disconnected]\x1b[0m\r\n');
+      if (entry.ws !== ws) return;
+      if (entry.busyOverlay) return;
+      entry.ws = null;
+      if (!entry.reconnecting) {
+        entry.reconnecting = true;
+        entry.term.write('\r\n\x1b[90m[reconnecting...]\x1b[0m\r\n');
+        pollReconnect(entry);
+      }
     };
   }
 
   function disconnectTab(entry) {
+    entry.reconnecting = false;
     if (!entry.ws) return;
     const ws = entry.ws;
     entry.ws = null;
-    ws.onclose = null; // suppress the "[disconnected]" message on intentional switch
+    ws.onclose = null;
     try { ws.close(); } catch (_) {}
   }
 
@@ -112,7 +138,7 @@
       return true;
     });
 
-    const entry = { serverId, label, tabEl, paneEl, term, fit, ws: null, busyOverlay: null };
+    const entry = { serverId, label, tabEl, paneEl, term, fit, ws: null, busyOverlay: null, reconnecting: false };
     tabs.push(entry);
 
     term.onData((data) => {
