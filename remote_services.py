@@ -90,32 +90,31 @@ async def seed_oh_config() -> None:
 
 async def seed_gh_auth() -> None:
     """Authenticate gh CLI with the GitHub OAuth token from the oauth provider. Best-effort."""
+    loop = asyncio.get_running_loop()
     try:
-        check = await asyncio.create_subprocess_exec(
-            "gh",
-            "auth",
-            "status",
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+        already = await loop.run_in_executor(
+            None,
+            lambda: subprocess.run(
+                ["gh", "auth", "status"],
+                capture_output=True,
+            ).returncode
+            == 0,
         )
-        await check.wait()
-        if check.returncode == 0:
-            return  # already authenticated
+        if already:
+            return
 
         token = await fetch_github_token()
         if not token:
             return
 
-        proc = await asyncio.create_subprocess_exec(
-            "gh",
-            "auth",
-            "login",
-            "--with-token",
-            stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+        await loop.run_in_executor(
+            None,
+            lambda: subprocess.run(
+                ["gh", "auth", "login", "--with-token"],
+                input=token.encode(),
+                capture_output=True,
+            ),
         )
-        await proc.communicate(input=token.encode())
     except Exception:
         pass
 

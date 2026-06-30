@@ -159,6 +159,7 @@ async def new_bash_tab(label: str | None = None) -> ServerTab:
 
 
 async def handle_terminal_ws() -> None:
+    await websocket.accept()
     tab_id = websocket.args.get("tab")
     tab = _tabs.get(tab_id) if tab_id else None
     if tab is None:

@@ -161,7 +161,13 @@ async def open_workspace() -> ResponseReturnValue:
 
 @app.websocket("/terminal/ws")
 async def terminal_ws() -> None:
-    await handle_terminal_ws()
+    try:
+        await handle_terminal_ws()
+    except Exception:
+        import traceback
+
+        traceback.print_exc()
+        raise
 
 
 async def _serve() -> None:
