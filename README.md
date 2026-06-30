@@ -6,7 +6,9 @@ point for building or debugging openhost apps.
 
 ## What's inside the container
 
-- `@anthropic-ai/claude-code` (npm, installed at image build time).
+- `@anthropic-ai/claude-code` (npm, installed at image build time). On
+  startup, it runs in `~/my_project`. By default, `claude` is aliased with
+  `--dangerously-skip-permissions` in this sandbox. 
 - Python 3 + git + the usual tools.
 - A clone of `https://github.com/imbue-openhost/openhost` placed at
   `~/openhost` on first container start (override with `OPENHOST_REPO_URL`
