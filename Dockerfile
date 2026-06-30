@@ -78,10 +78,8 @@ WORKDIR /root
 
 # Install the `oh` openhost CLI. uv fetches Python 3.12 automatically
 # (the CLI requires it).
-# TODO: pin to a tag/SHA once openhost exposes a release we can resolve at
-# build time; today this tracks the default branch and is non-reproducible.
 ENV PATH="/root/.local/bin:$PATH"
-RUN uv tool install "oh @ git+https://github.com/imbue-openhost/openhost.git#subdirectory=compute_space_cli"
+RUN uv tool install "oh @ git+https://github.com/imbue-openhost/openhost.git@v0.1.0#subdirectory=compute_space_cli"
 
 EXPOSE 5000
 ENTRYPOINT ["/usr/bin/tini", "--", "/app/entrypoint.sh"]
