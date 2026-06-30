@@ -18,7 +18,9 @@ async def health() -> ResponseReturnValue:
 
 @app.get("/")
 async def index() -> ResponseReturnValue:
-    return await send_from_directory(str(APP_DIR / "templates"), "index.html")
+    resp = await send_from_directory(str(APP_DIR / "templates"), "index.html")
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return resp
 
 
 @app.get("/api/tabs")
