@@ -144,16 +144,15 @@ def kill_tab(tab: ServerTab) -> None:
 
 
 async def new_bash_tab(label: str | None = None) -> ServerTab:
-    """Create a new tab running bash -l with claude auto-started."""
+    """Create a new tab running claude, falling back to bash when claude exits."""
     key = await get_anthropic_key()
     env: dict[str, str] = {}
     if key:
         env["ANTHROPIC_API_KEY"] = key
     return await create_server_tab(
-        command=["bash", "-l"],
+        command=["bash", "-l", "-c", "claude; exec bash"],
         cwd=str(MY_PROJECT_DIR) if MY_PROJECT_DIR.exists() else str(HOME),
         env=env,
-        stdin_seed="claude\n",
         label=label,
     )
 
