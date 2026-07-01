@@ -25,28 +25,14 @@
     toastTimer = setTimeout(() => el.classList.remove('visible'), 1500);
   }
 
-  function handleOsc52(chunk, term) {
-    // OSC 52 write: ESC ] 52 ; <sel> ; <base64> BEL|ST — used by TUI apps to copy to clipboard.
-    // Suppress when xterm has a selection: that means Claude Code is echoing mouse-selection
-    // events back as OSC 52, not performing an explicit user-initiated copy.
-    if (term.getSelection()) return;
-    const s = new TextDecoder('latin1').decode(chunk);
-    const m = s.match(/\x1b\]52;[^;]*;([A-Za-z0-9+/=]+)(?:\x07|\x1b\\)/);
-    if (!m || m[1] === '?') return;
-    try {
-      const raw = atob(m[1]);
-      const bytes = Uint8Array.from(raw, c => c.charCodeAt(0));
-      navigator.clipboard.writeText(new TextDecoder().decode(bytes))
-        .then(() => showToast('text copied!'))
-        .catch(() => {});
-    } catch (_) {}
-  }
+  let lastDimensions = { cols: 80, rows: 24 };
 
   function sendResize(entry) {
     if (!entry.ws || entry.ws.readyState !== WebSocket.OPEN) return;
     const d = entry.fit.proposeDimensions();
-    if (!d) return;
-    const json = new TextEncoder().encode(JSON.stringify({ type: 'resize', cols: d.cols, rows: d.rows }));
+    if (d) lastDimensions = d;
+    const dims = d || lastDimensions;
+    const json = new TextEncoder().encode(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }));
     const buf = new Uint8Array(1 + json.length);
     buf[0] = 0x01; buf.set(json, 1);
     entry.ws.send(buf.buffer);
@@ -79,13 +65,15 @@
     ws.binaryType = 'arraybuffer';
     entry.ws = ws;
 
-    ws.onopen = () => { if (activeEntry === entry) { entry.fit.fit(); sendResize(entry); } };
+    ws.onopen = () => {
+      if (activeEntry === entry) entry.fit.fit();
+      sendResize(entry); // always send; background tabs use lastDimensions
+    };
     ws.onmessage = (ev) => {
       if (!(ev.data instanceof ArrayBuffer)) { entry.term.write(ev.data); return; }
       const bytes = new Uint8Array(ev.data);
       if (bytes[0] === 0x00) {
         const chunk = bytes.subarray(1);
-        handleOsc52(chunk, entry.term);
         entry.term.write(chunk);
       } else if (bytes[0] === 0x01) {
         try {

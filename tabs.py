@@ -184,6 +184,25 @@ async def handle_terminal_ws() -> None:
     q: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=512)
     tab.client_queue = q
 
+    # Wait for the client's initial resize before replaying the output buffer.
+    # The client always sends resize in ws.onopen (active tabs use measured size,
+    # background tabs use last known size). Without this, output_buf would be
+    # written into a terminal that hasn't been sized yet, causing garbled display.
+    try:
+        first_msg = await asyncio.wait_for(websocket.receive(), timeout=1.0)
+        if isinstance(first_msg, bytes | bytearray) and len(first_msg) > 1:
+            if first_msg[0] == 0x01:
+                try:
+                    ctrl = json.loads(bytes(first_msg[1:]))
+                    if ctrl.get("type") == "resize":
+                        set_winsize(tab.master_fd, int(ctrl["rows"]), int(ctrl["cols"]))
+                except Exception:
+                    pass
+            elif first_msg[0] == 0x00:
+                os.write(tab.master_fd, bytes(first_msg[1:]))
+    except (TimeoutError, Exception):
+        pass
+
     if tab.output_buf:
         await websocket.send(b"\x00" + bytes(tab.output_buf))
 
