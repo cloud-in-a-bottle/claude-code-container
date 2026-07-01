@@ -25,11 +25,19 @@
     toastTimer = setTimeout(() => el.classList.remove('visible'), 1500);
   }
 
-  function handleOsc52(chunk, entry) {
-    // Suppress if xterm.js selection just changed — that means the user highlighted
-    // text and Claude Code echoed it back as OSC 52. Intentional copies from Claude
-    // Code (e.g. "copy code block") don't coincide with a selection change.
-    if (entry.selectionChanged) return;
+  function stripMouseTracking(chunk) {
+    // Strip DEC mouse-tracking enable sequences (?1000h–?1003h, ?1006h, ?1015h, ?1016h)
+    // before they reach xterm.js. Without this, xterm.js forwards mouse events to Claude
+    // Code's PTY, which redraws the screen on every selection change (clearing xterm.js's
+    // selection) and sends OSC 52 on mouse-selection (auto-copy). Disabling mouse tracking
+    // in xterm.js means selections are stable and Cmd+C always finds the selected text.
+    const s = new TextDecoder('latin1').decode(chunk);
+    const filtered = s.replace(/\x1b\[\?(?:1000|1001|1002|1003|1006|1015|1016)h/g, '');
+    if (filtered === s) return chunk;
+    return Uint8Array.from(filtered, c => c.charCodeAt(0));
+  }
+
+  function handleOsc52(chunk) {
     const s = new TextDecoder('latin1').decode(chunk);
     const m = s.match(/\x1b\]52;[^;]*;([A-Za-z0-9+/=]+)(?:\x07|\x1b\\)/);
     if (!m || m[1] === '?') return;
@@ -90,8 +98,8 @@
       if (!(ev.data instanceof ArrayBuffer)) { entry.term.write(ev.data); return; }
       const bytes = new Uint8Array(ev.data);
       if (bytes[0] === 0x00) {
-        const chunk = bytes.subarray(1);
-        handleOsc52(chunk, entry);
+        const chunk = stripMouseTracking(bytes.subarray(1));
+        handleOsc52(chunk);
         entry.term.write(chunk);
       } else if (bytes[0] === 0x01) {
         try {
@@ -175,24 +183,24 @@
         if (sel) {
           navigator.clipboard.writeText(sel)
             .then(() => showToast('text copied!'))
-            .catch(() => {});
+            .catch(() => {
+              // Fallback for contexts where navigator.clipboard is restricted
+              const ta = document.createElement('textarea');
+              ta.value = sel;
+              ta.style.cssText = 'position:fixed;top:-9999px;opacity:0';
+              document.body.appendChild(ta);
+              ta.select();
+              try { document.execCommand('copy'); showToast('text copied!'); } catch (_) {}
+              document.body.removeChild(ta);
+            });
           return false;
         }
       }
       return true;
     });
 
-    const entry = { serverId, label, tabEl, paneEl, term, fit, ws: null, busyOverlay: null, reconnecting: false, selectionChanged: false, _selTimer: null };
+    const entry = { serverId, label, tabEl, paneEl, term, fit, ws: null, busyOverlay: null, reconnecting: false };
     tabs.push(entry);
-
-    // Track selection changes so OSC 52 can distinguish intentional copies from
-    // mouse-selection echo-back (Claude Code sends OSC 52 for both, but only
-    // the intentional one should reach the system clipboard).
-    term.onSelectionChange(() => {
-      entry.selectionChanged = true;
-      clearTimeout(entry._selTimer);
-      entry._selTimer = setTimeout(() => { entry.selectionChanged = false; }, 300);
-    });
 
     term.onData((data) => {
       if (!entry.ws || entry.ws.readyState !== WebSocket.OPEN) return;
