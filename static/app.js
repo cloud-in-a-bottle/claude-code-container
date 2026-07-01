@@ -286,12 +286,16 @@
       for (const st of serverTabs) {
         openClientTab(st.id, st.label, false); // create UI without activating
       }
-      // Connect all tabs immediately so this client holds the lock on each one.
-      for (const t of tabs) connectTab(t);
       const toActivate = tabId
         ? (tabs.find(t => t.serverId === tabId) || tabs[0])
         : tabs[0];
-      activate(toActivate); // make one tab visible
+      // Connect background tabs immediately to claim their locks.
+      // The active tab is connected by activate() so the terminal is sized
+      // before ws.onopen fires and the server sends the output buffer.
+      for (const t of tabs) {
+        if (t !== toActivate) connectTab(t);
+      }
+      activate(toActivate);
     }
   }
 
