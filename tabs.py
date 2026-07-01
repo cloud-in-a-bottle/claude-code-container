@@ -4,6 +4,7 @@ import json
 import os
 import pty
 import secrets
+import shutil
 import signal
 import struct
 import subprocess
@@ -149,8 +150,17 @@ async def new_bash_tab(label: str | None = None) -> ServerTab:
     env: dict[str, str] = {}
     if key:
         env["ANTHROPIC_API_KEY"] = key
+    # Resolve the full path to claude now, while the server has the known-good
+    # Docker PATH. bash -l resets PATH to the system default before workbench.sh
+    # re-adds directories, and the npm global bin may not survive that reset.
+    claude_bin = shutil.which("claude") or "claude"
     return await create_server_tab(
-        command=["bash", "-l", "-c", "claude; exec bash"],
+        command=[
+            "bash",
+            "-l",
+            "-c",
+            f"for _i in 1 2 3; do {claude_bin} --dangerously-skip-permissions && break; sleep 1; done; exec bash",
+        ],
         cwd=str(MY_PROJECT_DIR) if MY_PROJECT_DIR.exists() else str(HOME),
         env=env,
         label=label,
