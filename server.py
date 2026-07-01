@@ -1,12 +1,15 @@
 import asyncio
+import shutil
 
 from quart import Quart, Response, jsonify, redirect, request, send_from_directory
 from quart.typing import ResponseReturnValue
 
 from config import APP_DIR, HOME, OPENHOST_DIR, PORT
 from remote_services import get_anthropic_key, seed_gh_auth, seed_oh_config
-from tabs import _tabs, create_server_tab, handle_terminal_ws, kick_tab, kill_tab, new_bash_tab
+from tabs import _tabs, create_server_tab, handle_terminal_ws, kick_tab, kill_tab, new_bash_tab, set_active_cwd
 from workspace import REF_RE, WORKSPACE_SCRIPT, repo_dir_name, resolve_access, validate_repo_url
+
+GITHUB_REPO_SCRIPT = APP_DIR / "github_repo.sh"
 
 app = Quart(__name__, template_folder=str(APP_DIR / "templates"), static_folder=str(APP_DIR / "static"))
 
@@ -43,6 +46,43 @@ async def create_tab() -> ResponseReturnValue:
     label: str | None = (data.get("label") or "").strip() or None
     tab = await new_bash_tab(label=label)
     return jsonify({"id": tab.id, "label": tab.label})
+
+
+@app.get("/github-repo")
+async def open_github_repo() -> ResponseReturnValue:
+    """Clone a GitHub repo and open it in Claude Code with the openhost-context skill loaded.
+
+    GET /github-repo?repo=https://github.com/user/repo
+    """
+    repo = (request.args.get("repo") or "").strip()
+    if not repo:
+        return jsonify({"error": "repo is required"}), 400
+    if not validate_repo_url(repo):
+        return jsonify({"error": "invalid repo URL"}), 400
+
+    repo_name = repo_dir_name(repo)
+    dest = HOME / repo_name
+
+    # Update the working directory for all tabs (existing + future) and claim the Claude slot.
+    set_active_cwd(str(dest))
+
+    key = await get_anthropic_key()
+    env: dict[str, str] = {
+        "GITHUB_REPO": repo,
+        "GITHUB_DIR": str(dest),
+        "CLAUDE_BIN": shutil.which("claude") or "claude",
+    }
+    if key:
+        env["ANTHROPIC_API_KEY"] = key
+
+    tab = await create_server_tab(
+        command=["bash", "-l", str(GITHUB_REPO_SCRIPT)],
+        cwd=str(HOME),
+        env=env,
+        label=repo_name,
+        stdin_seed="/openhost-context\n",
+    )
+    return redirect(f"/?tab={tab.id}", code=303)
 
 
 @app.post("/api/tabs/<tab_id>/kick")
