@@ -80,7 +80,6 @@ async def open_github_repo() -> ResponseReturnValue:
         cwd=str(HOME),
         env=env,
         label=repo_name,
-        stdin_seed="/openhost-context\n",
     )
     return redirect(f"/?tab={tab.id}", code=303)
 

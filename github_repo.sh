@@ -17,6 +17,14 @@ else
     cd "${GITHUB_DIR}"
 fi
 
+# Seed the openhost-context skill into CLAUDE.md so Claude Code picks it up
+# automatically on startup. Only created if the repo doesn't have its own
+# CLAUDE.md; kept local via .git/info/exclude so it never appears in git status.
+if [ ! -f CLAUDE.md ]; then
+    cp /app/skills/openhost/SKILL.md CLAUDE.md
+    echo "CLAUDE.md" >> .git/info/exclude 2>/dev/null || true
+fi
+
 for _i in 1 2 3; do
     "${CLAUDE_BIN}" --dangerously-skip-permissions && break
     sleep 1
