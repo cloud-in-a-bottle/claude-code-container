@@ -25,8 +25,11 @@
     toastTimer = setTimeout(() => el.classList.remove('visible'), 1500);
   }
 
-  function handleOsc52(chunk) {
-    // OSC 52 write: ESC ] 52 ; <sel> ; <base64> BEL|ST — used by TUI apps to copy to clipboard
+  function handleOsc52(chunk, term) {
+    // OSC 52 write: ESC ] 52 ; <sel> ; <base64> BEL|ST — used by TUI apps to copy to clipboard.
+    // Suppress when xterm has a selection: that means Claude Code is echoing mouse-selection
+    // events back as OSC 52, not performing an explicit user-initiated copy.
+    if (term.getSelection()) return;
     const s = new TextDecoder('latin1').decode(chunk);
     const m = s.match(/\x1b\]52;[^;]*;([A-Za-z0-9+/=]+)(?:\x07|\x1b\\)/);
     if (!m || m[1] === '?') return;
@@ -82,7 +85,7 @@
       const bytes = new Uint8Array(ev.data);
       if (bytes[0] === 0x00) {
         const chunk = bytes.subarray(1);
-        handleOsc52(chunk);
+        handleOsc52(chunk, entry.term);
         entry.term.write(chunk);
       } else if (bytes[0] === 0x01) {
         try {
