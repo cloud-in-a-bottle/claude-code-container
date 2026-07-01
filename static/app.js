@@ -25,6 +25,23 @@
     toastTimer = setTimeout(() => el.classList.remove('visible'), 1500);
   }
 
+  function handleOsc52(chunk, entry) {
+    // Suppress if xterm.js selection just changed — that means the user highlighted
+    // text and Claude Code echoed it back as OSC 52. Intentional copies from Claude
+    // Code (e.g. "copy code block") don't coincide with a selection change.
+    if (entry.selectionChanged) return;
+    const s = new TextDecoder('latin1').decode(chunk);
+    const m = s.match(/\x1b\]52;[^;]*;([A-Za-z0-9+/=]+)(?:\x07|\x1b\\)/);
+    if (!m || m[1] === '?') return;
+    try {
+      const raw = atob(m[1]);
+      const bytes = Uint8Array.from(raw, c => c.charCodeAt(0));
+      navigator.clipboard.writeText(new TextDecoder().decode(bytes))
+        .then(() => showToast('text copied!'))
+        .catch(() => {});
+    } catch (_) {}
+  }
+
   let lastDimensions = { cols: 80, rows: 24 };
 
   function sendResize(entry) {
@@ -74,6 +91,7 @@
       const bytes = new Uint8Array(ev.data);
       if (bytes[0] === 0x00) {
         const chunk = bytes.subarray(1);
+        handleOsc52(chunk, entry);
         entry.term.write(chunk);
       } else if (bytes[0] === 0x01) {
         try {
@@ -164,8 +182,17 @@
       return true;
     });
 
-    const entry = { serverId, label, tabEl, paneEl, term, fit, ws: null, busyOverlay: null, reconnecting: false };
+    const entry = { serverId, label, tabEl, paneEl, term, fit, ws: null, busyOverlay: null, reconnecting: false, selectionChanged: false, _selTimer: null };
     tabs.push(entry);
+
+    // Track selection changes so OSC 52 can distinguish intentional copies from
+    // mouse-selection echo-back (Claude Code sends OSC 52 for both, but only
+    // the intentional one should reach the system clipboard).
+    term.onSelectionChange(() => {
+      entry.selectionChanged = true;
+      clearTimeout(entry._selTimer);
+      entry._selTimer = setTimeout(() => { entry.selectionChanged = false; }, 300);
+    });
 
     term.onData((data) => {
       if (!entry.ws || entry.ws.readyState !== WebSocket.OPEN) return;
