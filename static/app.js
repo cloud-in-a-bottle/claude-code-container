@@ -322,7 +322,7 @@
   });
 
   window.addEventListener('resize', () => {
-    if (activeEntry) activeEntry.fit.fit();
+    if (activeEntry) { activeEntry.fit.fit(); sendResize(activeEntry); }
   });
 
   async function init() {
