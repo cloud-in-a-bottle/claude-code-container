@@ -125,9 +125,10 @@
     panesEl.appendChild(paneEl);
 
     const term = new Terminal({ cursorBlink: true, fontSize: 14,
-      theme: { background: '#1e1e1e' } });
+      theme: { background: '#1e1e1e' }, allowProposedApi: true });
     const fit = new FitAddon.FitAddon();
     term.loadAddon(fit);
+    term.loadAddon(new ClipboardAddon.ClipboardAddon());
     term.open(termEl);
 
     term.attachCustomKeyEventHandler((e) => {
