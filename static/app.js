@@ -11,6 +11,34 @@
     return `${proto}://${location.host}/terminal/ws?tab=${encodeURIComponent(tabId)}`;
   }
 
+  let toastTimer = null;
+  function showToast(msg) {
+    let el = document.getElementById('copy-toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'copy-toast';
+      document.body.appendChild(el);
+    }
+    el.textContent = msg;
+    el.classList.add('visible');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('visible'), 1500);
+  }
+
+  function handleOsc52(chunk) {
+    // OSC 52 write: ESC ] 52 ; <sel> ; <base64> BEL|ST — used by TUI apps to copy to clipboard
+    const s = new TextDecoder('latin1').decode(chunk);
+    const m = s.match(/\x1b\]52;[^;]*;([A-Za-z0-9+/=]+)(?:\x07|\x1b\\)/);
+    if (!m || m[1] === '?') return;
+    try {
+      const raw = atob(m[1]);
+      const bytes = Uint8Array.from(raw, c => c.charCodeAt(0));
+      navigator.clipboard.writeText(new TextDecoder().decode(bytes))
+        .then(() => showToast('text copied!'))
+        .catch(() => {});
+    } catch (_) {}
+  }
+
   function sendResize(entry) {
     if (!entry.ws || entry.ws.readyState !== WebSocket.OPEN) return;
     const d = entry.fit.proposeDimensions();
@@ -53,7 +81,9 @@
       if (!(ev.data instanceof ArrayBuffer)) { entry.term.write(ev.data); return; }
       const bytes = new Uint8Array(ev.data);
       if (bytes[0] === 0x00) {
-        entry.term.write(bytes.subarray(1));
+        const chunk = bytes.subarray(1);
+        handleOsc52(chunk);
+        entry.term.write(chunk);
       } else if (bytes[0] === 0x01) {
         try {
           const msg = JSON.parse(new TextDecoder().decode(bytes.subarray(1)));
@@ -125,16 +155,20 @@
     panesEl.appendChild(paneEl);
 
     const term = new Terminal({ cursorBlink: true, fontSize: 14,
-      theme: { background: '#1e1e1e' }, allowProposedApi: true });
+      theme: { background: '#1e1e1e' } });
     const fit = new FitAddon.FitAddon();
     term.loadAddon(fit);
-    term.loadAddon(new ClipboardAddon.ClipboardAddon());
     term.open(termEl);
 
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown' && e.metaKey && e.key === 'c') {
         const sel = term.getSelection();
-        if (sel) { navigator.clipboard.writeText(sel); return false; }
+        if (sel) {
+          navigator.clipboard.writeText(sel)
+            .then(() => showToast('text copied!'))
+            .catch(() => {});
+          return false;
+        }
       }
       return true;
     });
