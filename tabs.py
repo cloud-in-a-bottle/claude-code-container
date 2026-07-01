@@ -21,6 +21,7 @@ _KICKED_MSG = b"\x01" + json.dumps({"type": "kicked"}).encode()
 
 _tabs: dict[str, "ServerTab"] = {}
 _tab_counter: int = 0
+_claude_tab_created: bool = False
 
 
 @attr.s(auto_attribs=True)
@@ -145,26 +146,32 @@ def kill_tab(tab: ServerTab) -> None:
 
 
 async def new_bash_tab(label: str | None = None) -> ServerTab:
-    """Create a new tab running claude, falling back to bash when claude exits."""
-    key = await get_anthropic_key()
-    env: dict[str, str] = {}
-    if key:
-        env["ANTHROPIC_API_KEY"] = key
-    # Resolve the full path to claude now, while the server has the known-good
-    # Docker PATH. bash -l resets PATH to the system default before workbench.sh
-    # re-adds directories, and the npm global bin may not survive that reset.
-    claude_bin = shutil.which("claude") or "claude"
-    return await create_server_tab(
-        command=[
-            "bash",
-            "-l",
-            "-c",
-            f"for _i in 1 2 3; do {claude_bin} --dangerously-skip-permissions && break; sleep 1; done; exec bash",
-        ],
-        cwd=str(MY_PROJECT_DIR) if MY_PROJECT_DIR.exists() else str(HOME),
-        env=env,
-        label=label,
-    )
+    """Create a new tab. The first tab runs Claude Code; all others open plain bash in HOME."""
+    global _claude_tab_created
+    if not _claude_tab_created:
+        _claude_tab_created = True
+        key = await get_anthropic_key()
+        env: dict[str, str] = {}
+        if key:
+            env["ANTHROPIC_API_KEY"] = key
+        claude_bin = shutil.which("claude") or "claude"
+        return await create_server_tab(
+            command=[
+                "bash",
+                "-l",
+                "-c",
+                f"for _i in 1 2 3; do {claude_bin} --dangerously-skip-permissions && break; sleep 1; done; exec bash",
+            ],
+            cwd=str(MY_PROJECT_DIR) if MY_PROJECT_DIR.exists() else str(HOME),
+            env=env,
+            label=label,
+        )
+    else:
+        return await create_server_tab(
+            command=["bash", "-l"],
+            cwd=str(HOME),
+            label=label,
+        )
 
 
 async def handle_terminal_ws() -> None:
