@@ -22,6 +22,16 @@
     } catch (_) {}
   }
 
+  function filterOsc52Noise(chunk) {
+    // Claude Code outputs a verbose "sent N chars via OSC 52 · if paste fails..." hint
+    // because it can't confirm the clipboard write succeeded. Replace it with the
+    // shorter form that Claude uses when clipboard access is confirmed.
+    const s = new TextDecoder('latin1').decode(chunk);
+    const filtered = s.replace(/sent (\d+) chars? via OSC 52[^\r\n]*/g, 'copied $1 chars to clipboard');
+    if (filtered === s) return chunk;
+    return Uint8Array.from(filtered, c => c.charCodeAt(0));
+  }
+
   let lastDimensions = { cols: 80, rows: 24 };
 
   function sendResize(entry) {
@@ -72,7 +82,7 @@
       if (bytes[0] === 0x00) {
         const chunk = bytes.subarray(1);
         handleOsc52(chunk);
-        entry.term.write(chunk);
+        entry.term.write(filterOsc52Noise(chunk));
       } else if (bytes[0] === 0x01) {
         try {
           const msg = JSON.parse(new TextDecoder().decode(bytes.subarray(1)));
