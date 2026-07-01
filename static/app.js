@@ -252,12 +252,17 @@
     const openIds = new Set(tabs.map(t => t.serverId));
     const existing = serverTabs.filter(st => !openIds.has(st.id));
 
+    if (existing.length === 0) {
+      createNewServerTab();
+      return;
+    }
+
     const items = existing.map(st => ({
       label: st.label + (st.connected ? ' [busy]' : (!st.alive ? ' [exited]' : '')),
       action: () => openClientTab(st.id, st.label),
     }));
 
-    if (existing.length > 0) items.push(null);
+    items.push(null);
     items.push({ label: '+ New terminal', action: () => createNewServerTab() });
 
     showMenu(newTabEl, items);
