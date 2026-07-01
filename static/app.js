@@ -258,7 +258,15 @@
       } else {
         const el = document.createElement('div');
         el.className = 'tab-menu-item' + (item.disabled ? ' disabled' : '');
-        el.textContent = item.label;
+        const nameEl = document.createElement('div');
+        nameEl.textContent = item.label;
+        el.appendChild(nameEl);
+        if (item.description) {
+          const descEl = document.createElement('div');
+          descEl.className = 'tab-menu-desc';
+          descEl.textContent = item.description;
+          el.appendChild(descEl);
+        }
         if (!item.disabled) {
           el.addEventListener('click', () => { closeMenu(); item.action(); });
         }
@@ -298,10 +306,17 @@
       return;
     }
 
-    const items = existing.map(st => ({
-      label: st.label + (st.connected ? ' [busy]' : (!st.alive ? ' [exited]' : '')),
-      action: () => openClientTab(st.id, st.label),
-    }));
+    const items = existing.map(st => {
+      const flags = st.connected ? ' [busy]' : (!st.alive ? ' [exited]' : '');
+      const descParts = [];
+      if (st.cwd) descParts.push(st.cwd);
+      if (st.program) descParts.push(st.program);
+      return {
+        label: st.label + flags,
+        description: descParts.join(' · '),
+        action: () => openClientTab(st.id, st.label),
+      };
+    });
 
     items.push(null);
     items.push({ label: '+ New terminal', action: () => createNewServerTab() });

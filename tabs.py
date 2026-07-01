@@ -32,6 +32,60 @@ def set_active_cwd(path: str) -> None:
     _claude_tab_created = True
 
 
+def _proc_name(pgid: int) -> str:
+    """Return a human-readable process name for the PGID, or '' for shells/unknowns."""
+    try:
+        with open(f"/proc/{pgid}/comm") as f:
+            comm = f.read().strip()
+    except OSError:
+        return ""
+    if comm in ("bash", "sh", "dash"):
+        return ""
+    if comm == "node":
+        try:
+            with open(f"/proc/{pgid}/cmdline", "rb") as f:
+                cmdline = f.read().replace(b"\x00", b" ").decode("utf-8", errors="replace")
+            if "claude" in cmdline.lower():
+                return "claude"
+        except OSError:
+            pass
+        return ""
+    return comm
+
+
+def tab_proc_info(tab: "ServerTab") -> tuple[str, str]:
+    """Return (program, cwd) for the foreground process of a tab's PTY.
+
+    program is '' when the foreground is bash/unknown.
+    cwd uses '~' for the home directory prefix.
+    """
+    if not tab.alive:
+        return "", ""
+    try:
+        pgid = os.tcgetpgrp(tab.master_fd)
+    except OSError:
+        return "", ""
+    if pgid <= 0:
+        return "", ""
+
+    program = _proc_name(pgid)
+
+    cwd = ""
+    try:
+        raw = os.readlink(f"/proc/{pgid}/cwd")
+        home_s = str(HOME)
+        if raw == home_s:
+            cwd = "~"
+        elif raw.startswith(home_s + "/"):
+            cwd = "~" + raw[len(home_s) :]
+        else:
+            cwd = raw
+    except OSError:
+        pass
+
+    return program, cwd
+
+
 @attr.s(auto_attribs=True)
 class ServerTab:
     id: str

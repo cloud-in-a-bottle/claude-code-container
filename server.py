@@ -6,7 +6,16 @@ from quart.typing import ResponseReturnValue
 
 from config import APP_DIR, HOME, OPENHOST_DIR, PORT
 from remote_services import get_anthropic_key, seed_gh_auth, seed_oh_config
-from tabs import _tabs, create_server_tab, handle_terminal_ws, kick_tab, kill_tab, new_bash_tab, set_active_cwd
+from tabs import (
+    _tabs,
+    create_server_tab,
+    handle_terminal_ws,
+    kick_tab,
+    kill_tab,
+    new_bash_tab,
+    set_active_cwd,
+    tab_proc_info,
+)
 from workspace import REF_RE, WORKSPACE_SCRIPT, repo_dir_name, resolve_access, validate_repo_url
 
 GITHUB_REPO_SCRIPT = APP_DIR / "github_repo.sh"
@@ -35,9 +44,13 @@ async def index() -> ResponseReturnValue:
 
 @app.get("/api/tabs")
 async def list_tabs() -> ResponseReturnValue:
-    return jsonify(
-        [{"id": t.id, "label": t.label, "connected": t.connected, "alive": t.alive} for t in _tabs.values()]
-    )
+    result = []
+    for t in _tabs.values():
+        program, cwd = tab_proc_info(t)
+        result.append(
+            {"id": t.id, "label": t.label, "connected": t.connected, "alive": t.alive, "program": program, "cwd": cwd}
+        )
+    return jsonify(result)
 
 
 @app.post("/api/tabs")
