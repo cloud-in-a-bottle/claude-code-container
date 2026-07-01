@@ -36,7 +36,7 @@ RUN set -eux; \
     tar -xzf /tmp/glab.tar.gz -C /usr/local bin/glab; \
     rm /tmp/glab.tar.gz
 
-RUN npm install -g @anthropic-ai/claude-code
+RUN npm install -g @anthropic-ai/claude-code@latest
 
 # Python deps for the server.
 RUN python3 -m venv /opt/venv \
