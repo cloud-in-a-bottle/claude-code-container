@@ -22,6 +22,68 @@ _KICKED_MSG = b"\x01" + json.dumps({"type": "kicked"}).encode()
 _tabs: dict[str, "ServerTab"] = {}
 _tab_counter: int = 0
 _claude_tab_created: bool = False
+_active_cwd: str | None = None  # set via set_active_cwd(); used as cwd for all new tabs
+
+
+def set_active_cwd(path: str) -> None:
+    """Point all future tabs at a new working directory and mark the Claude tab as claimed."""
+    global _active_cwd, _claude_tab_created
+    _active_cwd = path
+    _claude_tab_created = True
+
+
+def _proc_name(pgid: int) -> str:
+    """Return a human-readable process name for the PGID, or '' for shells/unknowns."""
+    try:
+        with open(f"/proc/{pgid}/comm") as f:
+            comm = f.read().strip()
+    except OSError:
+        return ""
+    if comm in ("bash", "sh", "dash"):
+        return ""
+    if comm == "node":
+        try:
+            with open(f"/proc/{pgid}/cmdline", "rb") as f:
+                cmdline = f.read().replace(b"\x00", b" ").decode("utf-8", errors="replace")
+            if "claude" in cmdline.lower():
+                return "claude"
+        except OSError:
+            pass
+        return ""
+    return comm
+
+
+def tab_proc_info(tab: "ServerTab") -> tuple[str, str]:
+    """Return (program, cwd) for the foreground process of a tab's PTY.
+
+    program is '' when the foreground is bash/unknown.
+    cwd uses '~' for the home directory prefix.
+    """
+    if not tab.alive:
+        return "", ""
+    try:
+        pgid = os.tcgetpgrp(tab.master_fd)
+    except OSError:
+        return "", ""
+    if pgid <= 0:
+        return "", ""
+
+    program = _proc_name(pgid)
+
+    cwd = ""
+    try:
+        raw = os.readlink(f"/proc/{pgid}/cwd")
+        home_s = str(HOME)
+        if raw == home_s:
+            cwd = "~"
+        elif raw.startswith(home_s + "/"):
+            cwd = "~" + raw[len(home_s) :]
+        else:
+            cwd = raw
+    except OSError:
+        pass
+
+    return program, cwd
 
 
 @attr.s(auto_attribs=True)
@@ -155,6 +217,7 @@ async def new_bash_tab(label: str | None = None) -> ServerTab:
         if key:
             env["ANTHROPIC_API_KEY"] = key
         claude_bin = shutil.which("claude") or "claude"
+        cwd = _active_cwd or (str(MY_PROJECT_DIR) if MY_PROJECT_DIR.exists() else str(HOME))
         return await create_server_tab(
             command=[
                 "bash",
@@ -162,14 +225,14 @@ async def new_bash_tab(label: str | None = None) -> ServerTab:
                 "-c",
                 f"for _i in 1 2 3; do {claude_bin} --dangerously-skip-permissions && break; sleep 1; done; exec bash",
             ],
-            cwd=str(MY_PROJECT_DIR) if MY_PROJECT_DIR.exists() else str(HOME),
+            cwd=cwd,
             env=env,
             label=label,
         )
     else:
         return await create_server_tab(
             command=["bash", "-l"],
-            cwd=str(HOME),
+            cwd=_active_cwd or str(HOME),
             label=label,
         )
 

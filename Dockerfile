@@ -66,6 +66,7 @@ COPY tabs.py /app/tabs.py
 COPY workspace.py /app/workspace.py
 COPY server.py /app/server.py
 COPY open_workspace.sh /app/open_workspace.sh
+COPY github_repo.sh /app/github_repo.sh
 COPY templates /app/templates
 COPY static /app/static
 COPY skills /app/skills
@@ -76,7 +77,7 @@ COPY entrypoint.sh /app/entrypoint.sh
 COPY workbench.sh /etc/profile.d/workbench.sh
 RUN echo '[ -r /etc/profile.d/workbench.sh ] && . /etc/profile.d/workbench.sh' \
         >> /etc/bash.bashrc \
-    && chmod +x /app/entrypoint.sh
+    && chmod +x /app/entrypoint.sh /app/github_repo.sh
 
 WORKDIR /root
 
