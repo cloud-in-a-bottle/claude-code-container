@@ -185,6 +185,16 @@ The SSH session lands in the same persistent `$HOME` as the browser terminals (t
 openhost clone, `my_project`, shell history). The `sshd` host key is persisted too, so
 you won't get host-key-changed warnings across redeploys.
 
+To rotate the generated chisel credential, run this inside a workbench terminal:
+
+```bash
+/app/scripts/rotate-chisel-auth.sh
+```
+
+The script writes a new `~/.ssh/chisel-auth` and restarts the workbench. If you set a
+`CHISEL_AUTH` secret, rotate or remove that secret instead — it overrides the generated file on
+every start.
+
 ## Running locally without openhost
 
 ```

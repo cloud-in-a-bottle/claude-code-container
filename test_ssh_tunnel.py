@@ -52,7 +52,13 @@ def test_bind_host_defaults_public_and_honors_env() -> None:
 
 
 def test_shell_scripts_have_valid_syntax() -> None:
-    for script in ("tunnel.sh", "entrypoint.sh", "workbench.sh", "scripts/ssh-connect.sh"):
+    for script in (
+        "tunnel.sh",
+        "entrypoint.sh",
+        "workbench.sh",
+        "scripts/ssh-connect.sh",
+        "scripts/rotate-chisel-auth.sh",
+    ):
         subprocess.run(["bash", "-n", str(REPO / script)], check=True)
 
 

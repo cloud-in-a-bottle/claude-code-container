@@ -80,6 +80,9 @@ if [ -f "$HOME/.ssh/chisel-auth" ]; then
   Or, if you have this repo's helper script locally:
       CHISEL_AUTH='$(cat "$HOME/.ssh/chisel-auth")' \\
         ./scripts/ssh-connect.sh ${_wb_url}
+
+  To rotate this chisel credential from inside the workbench:
+      /app/scripts/rotate-chisel-auth.sh
 EOF
     if [ -s "$HOME/.ssh/authorized_keys" ] || [ -s "$HOME/.ssh/authorized_keys.secret" ]; then
         cat <<'EOF'
