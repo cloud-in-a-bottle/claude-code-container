@@ -4,7 +4,7 @@ import shutil
 from quart import Quart, Response, jsonify, redirect, request, send_from_directory
 from quart.typing import ResponseReturnValue
 
-from config import APP_DIR, HOME, OPENHOST_DIR, PORT
+from config import APP_DIR, BIND_HOST, HOME, OPENHOST_DIR, PORT
 from remote_services import get_anthropic_key, seed_gh_auth, seed_oh_config
 from tabs import (
     _tabs,
@@ -239,7 +239,7 @@ async def _serve() -> None:
     await seed_gh_auth()
 
     cfg = hypercorn.config.Config()
-    cfg.bind = [f"0.0.0.0:{PORT}"]
+    cfg.bind = [f"{BIND_HOST}:{PORT}"]
     cfg.accesslog = "-"
     await hypercorn.asyncio.serve(app, cfg)
 

@@ -10,6 +10,8 @@ point for building or debugging openhost apps.
   startup, it runs in `~/my_project`. By default, `claude` is aliased with
   `--dangerously-skip-permissions` in this sandbox. 
 - Python 3 + git + the usual tools.
+- `chisel` + `openssh-server`, wired up so you can SSH into the workbench from
+  outside over the same HTTPS subdomain (see [SSH access](#ssh-access)).
 - A clone of `https://github.com/imbue-openhost/openhost` placed at
   `~/openhost` on first container start (override with `OPENHOST_REPO_URL`
   or `OPENHOST_DIR` env vars).
@@ -110,6 +112,77 @@ strips it from the remote afterward so the token is never persisted on disk.
 Public repos clone without a token, and if no GitHub grant is available the
 clone falls back to an unauthenticated attempt.
 
+## SSH access
+
+You can SSH into the workbench from your own machine — a real terminal, `scp`,
+`rsync`, `git` over SSH, editor remote-dev, port-forwarding — without opening any
+firewall ports. Traffic is tunneled with [chisel](https://github.com/jpillora/chisel)
+over the workbench's existing HTTPS subdomain.
+
+### How it's wired
+
+`chisel server` runs as the container's front-door on the app port. It reverse-proxies
+all normal traffic to the Quart terminal UI (moved to a loopback backend port), so the
+browser experience is unchanged, and it accepts chisel tunnel connections on the public
+`/_chisel` path. Inside the container, `sshd` listens on `127.0.0.1:22` only — it is
+never bound to a host port; the sole way in is the tunnel.
+
+```
+  your machine                     openhost (HTTPS)              workbench container
+  ┌────────────┐   chisel over    ┌──────────────┐   proxy     ┌──────────────────┐
+  │ ssh client │──────wss────────▶│  router :443  │────────────▶│ chisel :$PORT     │
+  │ chisel cli │   /_chisel path  └──────────────┘             │   ├─ /_chisel→ssh │
+  └────────────┘                                               │   └─ else → quart │
+        └── localhost:2222 ──────────────(tunnel)──────────────▶│ sshd 127.0.0.1:22 │
+                                                                └──────────────────┘
+```
+
+Two layers of auth guard the tunnel (the openhost session cookie does **not** — the
+external client has no browser login, which is why `/_chisel` is a `public_path`):
+
+1. **chisel `--auth`** — a `user:pass` credential. Auto-generated and persisted on first
+   boot, or set the `CHISEL_AUTH` secret to pin your own.
+2. **SSH key auth** — `sshd` is key-only (`PermitRootLogin prohibit-password`,
+   `PasswordAuthentication no`).
+
+### One-time setup
+
+1. **Add your SSH public key.** Either paste it into a terminal tab (persists across
+   redeploys, since `$HOME` is on the app's data dir):
+
+   ```
+   echo 'ssh-ed25519 AAAA... you@host' >> ~/.ssh/authorized_keys
+   ```
+
+   …or set the `SSH_AUTHORIZED_KEYS` secret in the secrets app (one or more keys,
+   newline-separated) and restart the workbench.
+
+2. **Grab the chisel credential.** Open a terminal tab — the login banner prints it,
+   along with a ready-to-paste connect command. (Or set `CHISEL_AUTH` yourself.)
+
+3. **Install chisel on your machine** — see the
+   [chisel releases](https://github.com/jpillora/chisel/releases).
+
+### Connecting
+
+Using the bundled helper ([`scripts/ssh-connect.sh`](scripts/ssh-connect.sh)):
+
+```bash
+CHISEL_AUTH='workbench:xxxxxxxx' ./scripts/ssh-connect.sh https://claude-workbench.<zone>
+```
+
+Or by hand — open the tunnel, then SSH through it:
+
+```bash
+chisel client --auth 'workbench:xxxxxxxx' \
+  https://claude-workbench.<zone>/_chisel 2222:localhost:22 &
+ssh -p 2222 root@localhost
+```
+
+The SSH session lands in the same persistent `$HOME` as the browser terminals (the
+openhost clone, `my_project`, shell history). The `sshd` host key is persisted too, so
+you won't get host-key-changed warnings across redeploys.
+
 ## Running locally without openhost
 
 ```
@@ -117,4 +190,7 @@ pip install quart hypercorn
 python3 server.py
 ```
 
-Then open http://localhost:8080.
+Then open http://localhost:8080. This runs the terminal UI directly, without the
+chisel front-door or `sshd` (those are started by `tunnel.sh`, the container
+entrypoint's handoff). To exercise the full tunnel path locally, build and run the
+image (`just serve`) so `chisel` fronts the app.
