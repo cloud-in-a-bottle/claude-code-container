@@ -147,8 +147,9 @@ external client has no browser login, which is why `/_chisel` is a `public_path`
 
 ### One-time setup
 
-1. **Add your SSH public key.** Either paste it into a terminal tab (persists across
-   redeploys, since `$HOME` is on the app's data dir):
+1. **Add your local machine's SSH public key to the workbench.** Either paste it into
+   a workbench terminal tab (persists across redeploys, since `$HOME` is on the app's
+   data dir):
 
    ```
    echo 'ssh-ed25519 AAAA... you@host' >> ~/.ssh/authorized_keys

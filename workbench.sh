@@ -67,6 +67,12 @@ if [ -f "$HOME/.ssh/chisel-auth" ]; then
 ────────────────────────────────────────────────────────────────
   SSH into this workbench from your own machine (via chisel):
 
+  1. In this workbench terminal, add your LOCAL machine's PUBLIC ssh key:
+
+      echo 'ssh-ed25519 AAAA... you@host' >> ~/.ssh/authorized_keys
+
+  2. On your local machine, open the tunnel and ssh in:
+
       chisel client --auth '$(cat "$HOME/.ssh/chisel-auth")' \\
         ${_wb_url}/_chisel 2222:localhost:22 &
       ssh -p 2222 root@localhost
@@ -75,11 +81,15 @@ if [ -f "$HOME/.ssh/chisel-auth" ]; then
       CHISEL_AUTH='$(cat "$HOME/.ssh/chisel-auth")' \\
         ./scripts/ssh-connect.sh ${_wb_url}
 EOF
-    if [ ! -s "$HOME/.ssh/authorized_keys" ] && [ ! -s "$HOME/.ssh/authorized_keys.secret" ]; then
+    if [ -s "$HOME/.ssh/authorized_keys" ] || [ -s "$HOME/.ssh/authorized_keys.secret" ]; then
         cat <<'EOF'
 
-  ⚠ No ssh key installed yet. Add your PUBLIC key so you can log in:
-      echo 'ssh-ed25519 AAAA... you@host' >> ~/.ssh/authorized_keys
+  ✓ At least one ssh public key is already installed for sshd.
+EOF
+    else
+        cat <<'EOF'
+
+  ⚠ No ssh public key appears to be installed yet; step 1 is required.
 EOF
     fi
     unset _wb_app _wb_zone _wb_url
