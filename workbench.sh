@@ -67,13 +67,13 @@ if [ -f "$HOME/.ssh/chisel-auth" ]; then
 ────────────────────────────────────────────────────────────────
   SSH into this workbench from your own machine (via chisel):
 
-      CHISEL_AUTH='$(cat "$HOME/.ssh/chisel-auth")' \\
-        ./scripts/ssh-connect.sh ${_wb_url}
-
-  Or by hand:
       chisel client --auth '$(cat "$HOME/.ssh/chisel-auth")' \\
         ${_wb_url}/_chisel 2222:localhost:22 &
       ssh -p 2222 root@localhost
+
+  Or, if you have this repo's helper script locally:
+      CHISEL_AUTH='$(cat "$HOME/.ssh/chisel-auth")' \\
+        ./scripts/ssh-connect.sh ${_wb_url}
 EOF
     if [ ! -s "$HOME/.ssh/authorized_keys" ] && [ ! -s "$HOME/.ssh/authorized_keys.secret" ]; then
         cat <<'EOF'

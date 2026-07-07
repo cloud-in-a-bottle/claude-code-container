@@ -165,18 +165,19 @@ external client has no browser login, which is why `/_chisel` is a `public_path`
 
 ### Connecting
 
-Using the bundled helper ([`scripts/ssh-connect.sh`](scripts/ssh-connect.sh)):
+The terminal banner prints a ready-to-paste command with the real generated credential inlined.
+By hand, it looks like this — open the tunnel, then SSH through it:
 
 ```bash
-CHISEL_AUTH='workbench:xxxxxxxx' ./scripts/ssh-connect.sh https://claude-workbench.<zone>
-```
-
-Or by hand — open the tunnel, then SSH through it:
-
-```bash
-chisel client --auth 'workbench:xxxxxxxx' \
+chisel client --auth 'workbench:<token-from-banner>' \
   https://claude-workbench.<zone>/_chisel 2222:localhost:22 &
 ssh -p 2222 root@localhost
+```
+
+Or, using the bundled helper ([`scripts/ssh-connect.sh`](scripts/ssh-connect.sh)):
+
+```bash
+CHISEL_AUTH='workbench:<token-from-banner>' ./scripts/ssh-connect.sh https://claude-workbench.<zone>
 ```
 
 The SSH session lands in the same persistent `$HOME` as the browser terminals (the

@@ -176,9 +176,9 @@ your machine                      openhost (HTTPS)            claude-workbench c
 **Connect (once deployed).** Get `CHISEL_AUTH` from the workbench terminal login banner; add your
 pubkey first (`~/.ssh/authorized_keys` in a terminal, or the `SSH_AUTHORIZED_KEYS` secret):
 ```bash
-CHISEL_AUTH='workbench:xxxx' ./scripts/ssh-connect.sh https://claude-workbench2.oh.bowei.in
+CHISEL_AUTH='workbench:<token-from-banner>' ./scripts/ssh-connect.sh https://claude-workbench2.oh.bowei.in
 # or by hand:
-chisel client --auth 'workbench:xxxx' https://claude-workbench2.oh.bowei.in/_chisel 2222:localhost:22 &
+chisel client --auth 'workbench:<token-from-banner>' https://claude-workbench2.oh.bowei.in/_chisel 2222:localhost:22 &
 ssh -p 2222 root@localhost
 ```
 
@@ -201,4 +201,4 @@ ssh -p 2222 root@localhost
 - Branch: `chisel-ssh` @ `1ca2def` → https://github.com/boweiliu/claude-code-container/tree/chisel-ssh
 - New-PR link: https://github.com/boweiliu/claude-code-container/pull/new/chisel-ssh
 - Local checkout: `~/my_project/claude-code-container`
-- Live app: `claude-workbench2` @ `oh.bowei.in`, currently `main @ 31aa4db` (upstream)
+- Live app at handoff time: `claude-workbench2` @ `oh.bowei.in`, then `main @ 31aa4db` (upstream)

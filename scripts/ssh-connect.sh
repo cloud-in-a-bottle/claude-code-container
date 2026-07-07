@@ -7,8 +7,8 @@
 # terminal login banner (or the CHISEL_AUTH secret you set).
 #
 # Usage:
-#   CHISEL_AUTH='workbench:xxxxx' ./ssh-connect.sh https://claude-workbench.<zone>
-#   CHISEL_AUTH='workbench:xxxxx' ./ssh-connect.sh https://claude-workbench.<zone> 2222   # custom local port
+#   CHISEL_AUTH='workbench:<token-from-banner>' ./ssh-connect.sh https://claude-workbench.<zone>
+#   CHISEL_AUTH='workbench:<token-from-banner>' ./ssh-connect.sh https://claude-workbench.<zone> 2222   # custom local port
 #
 # It opens the tunnel, then drops you into an ssh session as root. Ctrl-D / exit tears the tunnel down.
 set -euo pipefail
