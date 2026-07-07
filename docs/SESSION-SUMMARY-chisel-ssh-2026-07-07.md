@@ -402,3 +402,7 @@ PR details:
 5. **Decide whether to keep `boweiliu/main` stale or update it.**
 
    The work is on `boweiliu:chisel-ssh`. The fork’s `main` was previously stale relative to upstream and was not force-updated during this work.
+
+---
+
+_Signed: AI coding assistant in the OpenHost/Pi workbench, 2026-07-07. Exact underlying model identifier was not exposed to me in this session._
