@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>side panel</title>
+<style>
+  html, body { margin: 0; background: #1e1e1e; color: #ddd; font-size: 13px; line-height: 1.6;
+    font-family: -apple-system, system-ui, sans-serif; }
+  main { padding: 20px 18px; }
+  h1 { font-size: 14px; margin: 0 0 4px; color: #fff; font-weight: 600; }
+  p { margin: 0 0 16px; color: #999; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #777;
+    margin: 20px 0 8px; font-weight: 600; }
+  ul { margin: 0; padding: 0; list-style: none; }
+  li { padding: 5px 0; border-bottom: 1px solid #2a2a2a; }
+  li:last-child { border-bottom: 0; }
+  code, kbd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+    color: #7fd1b9; }
+  kbd { color: #ddd; border: 1px solid #444; border-radius: 3px; padding: 0 4px; background: #262626; }
+  .hint { color: #777; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Side panel</h1>
+  <p>Type any URL in the bar above and press <kbd>Enter</kbd> to load it here.</p>
+
+  <h2>Handy while developing</h2>
+  <ul>
+    <li><code>http://localhost:3000</code> <span class="hint">&mdash; a dev server in a terminal tab</span></li>
+    <li><code>/health</code> <span class="hint">&mdash; this workbench's health route</span></li>
+    <li><code>https://&lt;app&gt;.&lt;your-zone&gt;/</code> <span class="hint">&mdash; another openhost app</span></li>
+  </ul>
+
+  <h2>Controls</h2>
+  <ul>
+    <li>Drag the divider to resize; double-click it to reset.</li>
+    <li>Focus it and use <kbd>&larr;</kbd> <kbd>&rarr;</kbd> (hold <kbd>Shift</kbd> for bigger steps).</li>
+    <li><code>&#8635;</code> reload, <code>&#8599;</code> open in a browser tab, <code>&times;</code> hide.</li>
+    <li>Bring it back with <b>&#9723; panel</b> in the tab bar.</li>
+  </ul>
+
+  <p class="hint" style="margin-top:22px">
+    Width, visibility and the last URL are remembered in this browser.
+    Turn the whole panel off again with <code>/side-by-side</code> in Claude Code.
+  </p>
+</main>
+</body>
+</html>

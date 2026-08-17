@@ -1,7 +1,7 @@
 import asyncio
 import shutil
 
-from quart import Quart, Response, jsonify, redirect, request, send_from_directory
+from quart import Quart, Response, jsonify, redirect, render_template, request
 from quart.typing import ResponseReturnValue
 
 from config import APP_DIR, HOME, OPENHOST_DIR, PORT
@@ -16,6 +16,7 @@ from tabs import (
     set_active_cwd,
     tab_proc_info,
 )
+from ui_settings import UiSettings, load_ui_settings, save_ui_settings
 from workspace import REF_RE, WORKSPACE_SCRIPT, repo_dir_name, resolve_access, validate_repo_url
 
 GITHUB_REPO_SCRIPT = APP_DIR / "github_repo.sh"
@@ -37,9 +38,24 @@ async def health() -> ResponseReturnValue:
 
 @app.get("/")
 async def index() -> ResponseReturnValue:
-    resp = await send_from_directory(str(APP_DIR / "templates"), "index.html")
-    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    return resp
+    html = await render_template("index.html", side_panel_enabled=load_ui_settings().side_panel)
+    return html, 200, {"Cache-Control": "no-cache, no-store, must-revalidate"}
+
+
+@app.get("/api/ui/settings")
+async def get_ui_settings() -> ResponseReturnValue:
+    return jsonify({"side_panel": load_ui_settings().side_panel})
+
+
+@app.post("/api/ui/settings")
+async def update_ui_settings() -> ResponseReturnValue:
+    """Toggle optional UI features. Takes effect on the next page load, not the current one."""
+    data = await request.get_json(silent=True) or {}
+    if "side_panel" not in data:
+        return jsonify({"error": "side_panel is required"}), 400
+    settings = UiSettings(side_panel=bool(data["side_panel"]))
+    save_ui_settings(settings)
+    return jsonify({"side_panel": settings.side_panel})
 
 
 @app.get("/api/tabs")

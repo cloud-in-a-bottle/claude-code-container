@@ -40,6 +40,29 @@ yourself.
 to `/terminal/ws`, which bridges to a PTY running `bash -l` inside the
 container.
 
+### Side-by-side panel (opt-in)
+
+A resizable pane beside the terminal that loads any URL in an iframe —
+handy for watching a dev server or another openhost app while you work.
+It's off by default. The easiest way to turn it on is the bundled skill:
+run `/side-by-side` in Claude Code and ask for it on or off. Under the
+hood that's just:
+
+```
+POST /api/ui/settings   { "side_panel": true }
+GET  /api/ui/settings   -> { "side_panel": false }
+```
+
+The setting is stored in `$HOME/.workbench/ui.json`. Since openhost points
+`HOME` at the app's persistent data dir, the choice survives container
+rebuilds. It takes effect on the next page load; reloading is safe because
+terminals live server-side and the page re-attaches to the running session.
+
+When enabled, `index.html` pulls in `static/side-panel.js`, which injects
+its own CSS and builds its own DOM. Nothing is fetched when it's off. It
+resizes the terminal by dispatching a `resize` event rather than calling
+into `app.js`, since `app.js` already refits xterm on that event.
+
 ## Prefilling a Claude session (preview)
 
 There's a stub for the eventual "open a Claude session with this context"
