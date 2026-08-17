@@ -4,21 +4,23 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>side panel</title>
+<link rel="stylesheet" href="/static/themes.css">
 <style>
-  html, body { margin: 0; background: #1e1e1e; color: #ddd; font-size: 13px; line-height: 1.6;
+  html, body { margin: 0; background: var(--bg); color: var(--fg); font-size: 13px; line-height: 1.6;
     font-family: -apple-system, system-ui, sans-serif; }
   main { padding: 20px 18px; }
-  h1 { font-size: 14px; margin: 0 0 4px; color: #fff; font-weight: 600; }
-  p { margin: 0 0 16px; color: #999; }
-  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #777;
+  h1 { font-size: 14px; margin: 0 0 4px; color: var(--bright); font-weight: 600; }
+  p { margin: 0 0 16px; color: var(--muted); }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--menu-desc);
     margin: 20px 0 8px; font-weight: 600; }
   ul { margin: 0; padding: 0; list-style: none; }
-  li { padding: 5px 0; border-bottom: 1px solid #2a2a2a; }
+  li { padding: 5px 0; border-bottom: 1px solid var(--border); }
   li:last-child { border-bottom: 0; }
   code, kbd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
-    color: #7fd1b9; }
-  kbd { color: #ddd; border: 1px solid #444; border-radius: 3px; padding: 0 4px; background: #262626; }
-  .hint { color: #777; }
+    color: var(--accent); }
+  kbd { color: var(--fg); border: 1px solid var(--menu-border); border-radius: 3px; padding: 0 4px;
+    background: var(--chrome-bg); }
+  .hint { color: var(--menu-desc); }
 </style>
 </head>
 <body>
@@ -46,5 +48,13 @@
     Turn the whole panel off again with <code>/side-by-side</code> in Claude Code.
   </p>
 </main>
+<script>
+  // This is a separate document, so it doesn't inherit the parent's data-theme. The parent sets it
+  // directly when the scheme changes; this covers the initial load and opening the page standalone.
+  fetch('/api/ui/settings')
+    .then(function (r) { return r.json(); })
+    .then(function (s) { if (s && s.theme) document.documentElement.setAttribute('data-theme', s.theme); })
+    .catch(function () { /* keep the default scheme */ });
+</script>
 </body>
 </html>

@@ -16,7 +16,7 @@ from tabs import (
     set_active_cwd,
     tab_proc_info,
 )
-from ui_settings import UiSettings, load_ui_settings, save_ui_settings
+from ui_settings import THEMES, UiSettings, load_ui_settings, save_ui_settings
 from workspace import REF_RE, WORKSPACE_SCRIPT, repo_dir_name, resolve_access, validate_repo_url
 
 GITHUB_REPO_SCRIPT = APP_DIR / "github_repo.sh"
@@ -36,26 +36,44 @@ async def health() -> ResponseReturnValue:
     return {"status": "ok"}, 200
 
 
+def _settings_json(settings: UiSettings) -> dict[str, object]:
+    return {"side_panel": settings.side_panel, "theme": settings.theme}
+
+
 @app.get("/")
 async def index() -> ResponseReturnValue:
-    html = await render_template("index.html", side_panel_enabled=load_ui_settings().side_panel)
+    settings = load_ui_settings()
+    html = await render_template("index.html", side_panel_enabled=settings.side_panel, theme=settings.theme)
     return html, 200, {"Cache-Control": "no-cache, no-store, must-revalidate"}
 
 
 @app.get("/api/ui/settings")
 async def get_ui_settings() -> ResponseReturnValue:
-    return jsonify({"side_panel": load_ui_settings().side_panel})
+    return jsonify(_settings_json(load_ui_settings()))
 
 
 @app.post("/api/ui/settings")
 async def update_ui_settings() -> ResponseReturnValue:
-    """Toggle optional UI features. Takes effect on the next page load, not the current one."""
+    """Update UI settings. Keys left out keep their current value.
+
+    `side_panel` takes effect on the next page load; `theme` is applied live by the client.
+    """
     data = await request.get_json(silent=True) or {}
-    if "side_panel" not in data:
-        return jsonify({"error": "side_panel is required"}), 400
-    settings = UiSettings(side_panel=bool(data["side_panel"]))
+    known = {"side_panel", "theme"}
+    if not known & data.keys():
+        return jsonify({"error": f"expected at least one of: {', '.join(sorted(known))}"}), 400
+
+    current = load_ui_settings()
+    theme = str(data.get("theme", current.theme))
+    if theme not in THEMES:
+        return jsonify({"error": f"unknown theme {theme!r}; expected one of: {', '.join(THEMES)}"}), 400
+
+    settings = UiSettings(
+        side_panel=bool(data.get("side_panel", current.side_panel)),
+        theme=theme,
+    )
     save_ui_settings(settings)
-    return jsonify({"side_panel": settings.side_panel})
+    return jsonify(_settings_json(settings))
 
 
 @app.get("/api/tabs")

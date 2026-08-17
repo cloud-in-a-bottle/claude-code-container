@@ -1,0 +1,81 @@
+/* Chrome colours for the workbench UI, selected by the data-theme attribute on <html>.
+ *
+ * Shared by index.html and the side panel's home page, so both documents restyle together.
+ * The bare :root block is the default dark theme: with no data-theme attribute, or an unknown
+ * one, the UI looks exactly as it did before themes existed.
+ *
+ * The terminal's own 16-colour palette is not here — xterm.js is canvas-rendered and takes its
+ * colours as a JS object, so those live alongside these names in static/theme.js.
+ */
+
+:root {
+  color-scheme: dark;
+  --bg: #1e1e1e;
+  --fg: #ddd;
+  --chrome-bg: #111;
+  --border: #333;
+  --muted: #aaa;
+  --faint: #888;
+  --bright: #fff;
+  --hover-bg: #2a2a2a;
+  --menu-bg: #222;
+  --menu-border: #444;
+  --menu-desc: #777;
+  --input-bg: #1e1e1e;
+  --btn-bg: #2a2a2a;
+  --btn-border: #555;
+  --btn-fg: #ccc;
+  --danger: #f55;
+  --accent: #7fd1b9;
+  --overlay-bg: rgba(20, 20, 20, 0.92);
+  --overlay-fg: #bbb;
+}
+
+/* Solarized — Ethan Schoonover's palette. Both variants share one set of accent colours and
+ * differ only in which end of the base range is background and which is foreground. */
+
+:root[data-theme="solarized-light"] {
+  color-scheme: light;
+  --bg: #fdf6e3;          /* base3  */
+  --fg: #657b83;          /* base00 */
+  --chrome-bg: #eee8d5;   /* base2  */
+  --border: #ddd6c1;
+  --muted: #93a1a1;       /* base1  */
+  --faint: #93a1a1;
+  --bright: #073642;      /* base02 */
+  --hover-bg: #e7e0ca;
+  --menu-bg: #eee8d5;
+  --menu-border: #d3cbb7;
+  --menu-desc: #93a1a1;
+  --input-bg: #fdf6e3;
+  --btn-bg: #eee8d5;
+  --btn-border: #c9c1ad;
+  --btn-fg: #586e75;      /* base01 */
+  --danger: #dc322f;
+  --accent: #268bd2;
+  --overlay-bg: rgba(253, 246, 227, 0.92);
+  --overlay-fg: #586e75;
+}
+
+:root[data-theme="solarized-dark"] {
+  color-scheme: dark;
+  --bg: #002b36;          /* base03 */
+  --fg: #839496;          /* base0  */
+  --chrome-bg: #073642;   /* base02 */
+  --border: #0d4a5a;
+  --muted: #93a1a1;       /* base1  */
+  --faint: #586e75;       /* base01 */
+  --bright: #fdf6e3;      /* base3  */
+  --hover-bg: #0a4757;
+  --menu-bg: #073642;
+  --menu-border: #0d4a5a;
+  --menu-desc: #586e75;
+  --input-bg: #002b36;
+  --btn-bg: #073642;
+  --btn-border: #12586b;
+  --btn-fg: #93a1a1;
+  --danger: #dc322f;
+  --accent: #2aa198;
+  --overlay-bg: rgba(0, 43, 54, 0.92);
+  --overlay-fg: #93a1a1;
+}

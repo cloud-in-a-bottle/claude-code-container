@@ -154,10 +154,12 @@
     panesEl.appendChild(paneEl);
 
     const term = new Terminal({ cursorBlink: true, fontSize: 14,
-      theme: { background: '#1e1e1e' } });
+      theme: window.workbenchTheme ? window.workbenchTheme.xterm() : { background: '#1e1e1e' } });
     const fit = new FitAddon.FitAddon();
     term.loadAddon(fit);
     term.open(termEl);
+    // Hand it to the theme picker so switching schemes recolours already-open terminals.
+    if (window.workbenchTheme) window.workbenchTheme.register(term);
 
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown' && e.metaKey && e.key === 'c') {

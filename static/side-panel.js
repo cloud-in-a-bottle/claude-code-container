@@ -19,25 +19,25 @@
 
   // ---- styles ---------------------------------------------------------------
   var css = [
-    '#sp-toggle { margin-left: auto; align-self: center; padding: 4px 12px; cursor: pointer;',
-    '  color: #888; font-size: 12px; white-space: nowrap; }',
-    '#sp-toggle:hover { color: #fff; }',
+    '#sp-toggle { align-self: center; padding: 4px 12px; cursor: pointer;',
+    '  color: var(--faint); font-size: 12px; white-space: nowrap; }',
+    '#sp-toggle:hover { color: var(--bright); }',
     '#sp-split { flex: 1; display: flex; min-height: 0; }',
     '#sp-left { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }',
-    '#sp-divider { flex: 0 0 6px; background: #111; border-left: 1px solid #333;',
-    '  border-right: 1px solid #333; cursor: col-resize; }',
-    '#sp-divider:hover, #sp-divider.dragging { background: #3a3a3a; }',
-    '#sp-divider:focus-visible { outline: 2px solid #7fd1b9; outline-offset: -2px; }',
-    '#sp-side { flex: 0 0 460px; min-width: 0; display: flex; flex-direction: column; background: #1e1e1e; }',
+    '#sp-divider { flex: 0 0 6px; background: var(--chrome-bg); border-left: 1px solid var(--border);',
+    '  border-right: 1px solid var(--border); cursor: col-resize; }',
+    '#sp-divider:hover, #sp-divider.dragging { background: var(--hover-bg); }',
+    '#sp-divider:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }',
+    '#sp-side { flex: 0 0 460px; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }',
     '#sp-bar { display: flex; align-items: center; gap: 4px; padding: 4px 6px;',
-    '  background: #111; border-bottom: 1px solid #333; }',
-    '#sp-url { flex: 1; min-width: 0; background: #1e1e1e; border: 1px solid #333; color: #ddd;',
+    '  background: var(--chrome-bg); border-bottom: 1px solid var(--border); }',
+    '#sp-url { flex: 1; min-width: 0; background: var(--input-bg); border: 1px solid var(--border); color: var(--fg);',
     '  border-radius: 3px; padding: 3px 7px; font-size: 12px; font-family: ui-monospace, Menlo, monospace; }',
-    '#sp-url:focus { outline: none; border-color: #666; }',
-    '.sp-btn { background: none; border: 1px solid transparent; color: #888; cursor: pointer;',
+    '#sp-url:focus { outline: none; border-color: var(--btn-border); }',
+    '.sp-btn { background: none; border: 1px solid transparent; color: var(--faint); cursor: pointer;',
     '  font-size: 13px; padding: 2px 7px; border-radius: 3px; line-height: 1.4; }',
-    '.sp-btn:hover { color: #fff; background: #2a2a2a; border-color: #444; }',
-    '#sp-frame { flex: 1; width: 100%; border: 0; background: #1e1e1e; }',
+    '.sp-btn:hover { color: var(--bright); background: var(--hover-bg); border-color: var(--menu-border); }',
+    '#sp-frame { flex: 1; width: 100%; border: 0; background: var(--bg); }',
     'body.sp-hidden #sp-side, body.sp-hidden #sp-divider { display: none; }',
     'body.sp-dragging { user-select: none; }',
     'body.sp-dragging #sp-frame { pointer-events: none; }'
@@ -81,7 +81,7 @@
   toggle.id = 'sp-toggle';
   toggle.title = 'Show/hide the side panel';
   toggle.textContent = '◻ panel';
-  tabsBar.appendChild(toggle);
+  (document.getElementById('tab-actions') || tabsBar).appendChild(toggle);
 
   var body = document.body;
   var frame = document.getElementById('sp-frame');

@@ -116,6 +116,33 @@ skill walks Claude through all of this.
 to `/terminal/ws`, which bridges to a PTY running `bash -l` inside the
 container.
 
+### Colour schemes
+
+A picker in the top-right of the tab bar switches between **Dark** (the
+default), **Solarized Light** and **Solarized Dark**. It applies immediately —
+open terminals are recoloured in place, no reload — and is saved server-side in
+`$HOME/.workbench/ui.json`, so it persists across restarts and rebuilds and
+follows you to any browser.
+
+```
+POST /api/ui/settings   { "theme": "solarized-light" }
+```
+
+A scheme is defined in two halves, because the terminal and the chrome are
+painted by different machinery:
+
+- `static/themes.css` — CSS variables selected by `data-theme` on `<html>`,
+  covering the tab bar, menus, and side panel. The bare `:root` block is the
+  dark default, so an unknown or absent theme falls back to the original look.
+- `static/theme.js` — the terminal's 16-colour ANSI palette, which xterm.js
+  needs as a JS object since it renders to a canvas.
+
+The server renders `data-theme` into the page, so there's no flash of the wrong
+colours before the picker initialises. Adding a scheme means touching
+`THEMES` in `ui_settings.py`, `themes.css`, and `theme.js` — a test asserts
+those three lists agree, so a half-added theme fails rather than rendering
+unstyled.
+
 ### Side-by-side panel (opt-in)
 
 A resizable pane beside the terminal that loads any URL in an iframe —
