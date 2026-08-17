@@ -110,6 +110,12 @@ The setting is stored in `$HOME/.workbench/ui.json`. Since openhost points
 rebuilds. It takes effect on the next page load; reloading is safe because
 terminals live server-side and the page re-attaches to the running session.
 
+Drag the divider to resize, or double-click it to reset; it's focusable, with
+arrow keys (Shift for larger steps). The pane's toolbar has a URL bar plus
+reload, open-in-a-real-tab, and hide buttons, and **◻ panel** in the tab bar
+brings a hidden pane back. Width, visibility and last URL are remembered per
+browser in `localStorage`; the on/off setting above is server-side.
+
 When enabled, `index.html` pulls in `static/side-panel.js`, which injects
 its own CSS and builds its own DOM. Nothing is fetched when it's off. It
 resizes the terminal by dispatching a `resize` event rather than calling

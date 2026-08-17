@@ -5,80 +5,38 @@ description: Authenticate gh and git inside the workbench using openhost's oauth
 
 # GitHub auth in the workbench
 
-The workbench mints short-lived GitHub tokens through openhost's `oauth-v2` app. Do not ask the
-user for a personal access token until the flow below has actually failed.
+**Read the "GitHub auth" section of `/app/README.md` first** (that's this repo's `README.md`, baked
+into the image). It has the exact commands for listing
+granted accounts, minting a token, and using it — along with the two failures that block almost
+every attempt (`account` being required, and `gh auth login --with-token` rejecting the token for
+want of `read:org`). Follow it rather than improvising; don't ask the user for a personal access
+token until that flow has actually failed.
 
-Two things trip up almost every attempt, so start by reading them:
+What follows is only the judgement that doesn't belong in a reference doc.
 
-1. **`account` is required when minting.** It defaults to `"default"`, which matches no real
-   grant, so omitting it returns `permission_required` even when the user has already approved
-   access.
-2. **Do not use `gh auth login --with-token`.** The minted token is `repo`-scoped and that command
-   demands `read:org`, so it fails with *"missing required scope 'read:org'"*. Use `GH_TOKEN`.
+## Handling `permission_required`
 
-## 1. Find the granted account
+The response carries a `grant_url` that only the user can approve in a browser. Give them the URL,
+say plainly that you're blocked until they approve, and stop. Do not poll for it — approval can't
+be waited into existence, and a retry loop just burns turns. Retry once they say they've done it.
 
-```bash
-curl -s -X POST "$OPENHOST_ROUTER_URL/api/services/v2/call/oauth/accounts" \
-  -H "Authorization: Bearer $OPENHOST_APP_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"provider":"github","scopes":["repo"]}'
-```
+## Don't leak the token
 
-Returns `{"accounts":["<login>", ...]}`, often repeating the same login — dedupe it. An empty list
-means nothing is granted yet; go to step 3.
+Never print an access token. Write it to a file or a variable, and pipe any command that might echo
+it through `sed -E 's/gh[a-z]_[A-Za-z0-9]+/<REDACTED>/g'`. Prefer embedding it in a one-off remote
+URL over configuring stored git credentials.
 
-## 2. Mint the token
+## Before pushing
 
-```bash
-curl -s -X POST "$OPENHOST_ROUTER_URL/api/services/v2/call/oauth/token" \
-  -H "Authorization: Bearer $OPENHOST_APP_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"provider":"github","scopes":["repo"],"account":"<login>"}'
-```
-
-On success the response has `access_token`. Never print it — write it to a file or a variable, and
-redact it from any command output you show the user.
-
-## 3. If you get `permission_required`
-
-The response body contains a `grant_url`. Give the user that URL and ask them to approve it in a
-browser; only they can. Append `return_to=/` if it is empty — the provider ignores any `return_to`
-that does not start with `/`.
-
-Approval is not something you can poll into existence, and repeatedly retrying is just noise. Ask,
-wait for the user to say they have done it, then retry step 1. Confirm what landed with:
+Check you actually have write access instead of assuming it:
 
 ```bash
-oh curl -- -s "https://$OPENHOST_ZONE_DOMAIN/api/permissions/v2?app_id=$OPENHOST_APP_ID"
-```
-
-Grants show up there with their `scope` (`app` or `global`) and the `account` they are tied to.
-
-## 4. Use the token
-
-```bash
-export GH_TOKEN=$(cat /path/to/token)
-gh api user -q .login
 gh api repos/<owner>/<repo> -q '{push:.permissions.push, admin:.permissions.admin}'
 ```
 
-Check `push` before assuming you can push a branch; fork instead when it is `false`.
+Fork when `push` is `false`. And treat pushing a branch, opening a PR, or commenting as
+outward-facing: confirm with the user before the first one unless they've already asked for it.
 
-For git itself, embed the token in the remote URL for a single command rather than storing
-credentials:
+## If a call that worked starts failing
 
-```bash
-git push "https://x-access-token:$GH_TOKEN@github.com/<owner>/<repo>.git" <branch>
-```
-
-Pipe output through `sed -E 's/gh[a-z]_[A-Za-z0-9]+/<REDACTED>/g'` so a token cannot leak into the
-transcript.
-
-## Notes
-
-- Tokens expire. If a call that worked earlier starts returning 401, re-mint from step 2.
-- `seed_gh_auth()` in `remote_services.py` is meant to do this at startup but currently requests a
-  token without an `account`, so it silently no-ops. That is why `gh` is usually logged out.
-- Opening a PR, pushing, or anything else that leaves the machine is the user's call. Confirm
-  before the first such action unless they have already asked for it.
+Tokens are short-lived. A sudden 401 usually means re-mint, not a broken setup.

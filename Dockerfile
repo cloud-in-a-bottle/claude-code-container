@@ -70,6 +70,8 @@ COPY github_repo.sh /app/github_repo.sh
 COPY templates /app/templates
 COPY static /app/static
 COPY skills /app/skills
+# The bundled skills point at this rather than restating it, so it has to be in the image.
+COPY README.md /app/README.md
 COPY entrypoint.sh /app/entrypoint.sh
 # Site rcfile: lives under /etc so $HOME (which we point at the persistent data
 # dir at runtime) stays untouched and user edits to ~/.bashrc/~/.bash_profile
