@@ -8,6 +8,8 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from litestar import Litestar
+from litestar.testing import TestClient
 
 from server import app as srv
 from server import tab_store
@@ -202,6 +204,10 @@ def _stub_create_tab(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     return created
 
 
+def _client() -> TestClient[Litestar]:
+    return TestClient(app=srv.app)
+
+
 def _post(
     form: dict[str, str] | None = None,
     json: dict[str, str] | None = None,
@@ -209,17 +215,12 @@ def _post(
 ) -> Any:
     kwargs: dict[str, Any] = {}
     if form is not None:
-        kwargs["form"] = form
+        kwargs["data"] = form
     if json is not None:
         kwargs["json"] = json
     if query is not None:
-        kwargs["query_string"] = query
-
-    async def go() -> Any:
-        client = srv.app.test_client()
-        return await client.post("/open-workspace", **kwargs)
-
-    return run(go())
+        kwargs["params"] = query
+    return _client().post("/open-workspace", follow_redirects=False, **kwargs)
 
 
 def test_missing_repo_is_400(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -394,22 +395,13 @@ def test_accepts_get_with_query(monkeypatch: pytest.MonkeyPatch) -> None:
     _stub_access(monkeypatch, "ok")
     _stub_create_tab(monkeypatch)
 
-    async def go() -> Any:
-        client = srv.app.test_client()
-        return await client.get(
-            "/open-workspace",
-            query_string={"repo": "https://github.com/o/r.git", "ref": "main"},
-        )
-
-    resp = run(go())
+    resp = _client().get(
+        "/open-workspace", params={"repo": "https://github.com/o/r.git", "ref": "main"}, follow_redirects=False
+    )
     assert resp.status_code == 303
     assert resp.headers["Location"].startswith("/?tab=")
 
 
 def test_debug_route_is_gone() -> None:
-    async def go() -> Any:
-        client = srv.app.test_client()
-        return await client.get("/debug", query_string={"repo": "https://github.com/o/r.git"})
-
-    resp = run(go())
+    resp = _client().get("/debug", params={"repo": "https://github.com/o/r.git"})
     assert resp.status_code == 404

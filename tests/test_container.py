@@ -21,7 +21,7 @@ def test_health_endpoint(stack: OpenhostStack) -> None:
 
 
 def test_index_renders_the_terminal_ui(stack: OpenhostStack) -> None:
-    """A smoke test that the image's static assets and templates are where Quart expects.
+    """A smoke test that the image's static assets and templates are where Litestar expects.
 
     A wrong path here is the kind of break that only shows up in a real container.
     """

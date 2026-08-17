@@ -2,7 +2,7 @@
 - on first init, run `just setup` — this installs dependencies, the pre-commit hooks, and the playwright chromium browser. pre-commit runs ruff and mypy on commit.
 - use uv for all python work (`uv run ...`, `uv add ...`, `uv sync`).
 - this is an OpenHost app. `openhost.toml` is the app manifest.
-- the app is a quart/hypercorn backend that serves on port 5000 and exposes a `/health` endpoint. see "deploying & debugging on openhost" below.
+- the app is a litestar/hypercorn backend that serves on port 5000 and exposes a `/health` endpoint. see "deploying & debugging on openhost" below.
 - `just test` runs the fast unit tests and needs nothing but python. `just test-integration` uses the OpenHost test harness (the `openhost[test-harness]` package, imported as `openhost_test_harness`): it builds the Dockerfile, runs the app under podman per `openhost.toml`, and fronts it with the real OpenHost router, so it requires podman running on the host. `stack.url` goes through the router and requires owner auth (use `stack.owner_session` for requests, or `stack.playwright_login(page)` for browser tests); `stack.app_url` hits the container directly.
 
 ## deploying & debugging on openhost

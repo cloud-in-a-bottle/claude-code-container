@@ -1,16 +1,30 @@
 import asyncio
 import shutil
 import traceback
+from typing import Any
+from typing import cast
 
 import hypercorn.asyncio
 import hypercorn.config
-from quart import Quart
-from quart import Response
-from quart import jsonify
-from quart import redirect
-from quart import render_template
-from quart import request
-from quart.typing import ResponseReturnValue
+from litestar import Litestar
+from litestar import MediaType
+from litestar import Request
+from litestar import Response
+from litestar import WebSocket
+from litestar import delete
+from litestar import get
+from litestar import post
+from litestar import route
+from litestar import websocket
+from litestar.datastructures import CacheControlHeader
+from litestar.enums import HttpMethod
+from litestar.params import FromPath
+from litestar.params import FromQuery
+from litestar.plugins.jinja import JinjaTemplateEngine
+from litestar.response import Redirect
+from litestar.response import Template
+from litestar.static_files import create_static_files_router
+from litestar.template.config import TemplateConfig
 
 from server.config import APP_DIR
 from server.config import HOME
@@ -44,91 +58,102 @@ from server.workspace import validate_repo_url
 
 GITHUB_REPO_SCRIPT = APP_DIR / "github_repo.sh"
 
-app = Quart(__name__, template_folder=str(APP_DIR / "templates"), static_folder=str(APP_DIR / "static"))
+NO_CACHE = CacheControlHeader(no_cache=True, no_store=True, must_revalidate=True)
+
+type JsonDict = dict[str, Any]
 
 
-@app.after_request
-async def no_cache_static(response: Response) -> Response:
-    if request.path.startswith("/static/"):
-        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    return response
+def _error(status: int, **body: Any) -> Response[JsonDict]:
+    return Response(content=body, status_code=status)
 
 
-@app.get("/health")
-async def health() -> ResponseReturnValue:
-    return {"status": "ok"}, 200
+async def _json_body(request: Request[Any, Any, Any]) -> JsonDict:
+    """The request's JSON object, or {} when there isn't a usable one.
+
+    Callers here treat a missing or malformed body the same as an empty one and produce their own
+    error, rather than letting the framework reject it with a shape the clients don't expect.
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
-def _settings_json(settings: UiSettings) -> dict[str, object]:
+@get("/health", sync_to_thread=False)
+def health() -> JsonDict:
+    return {"status": "ok"}
+
+
+def _settings_json(settings: UiSettings) -> JsonDict:
     return {"side_panel": settings.side_panel, "theme": settings.theme}
 
 
-@app.get("/")
-async def index() -> ResponseReturnValue:
+@get("/", media_type=MediaType.HTML, cache_control=NO_CACHE, sync_to_thread=False)
+def index() -> Template:
     settings = load_ui_settings()
-    html = await render_template("index.html", side_panel_enabled=settings.side_panel, theme=settings.theme)
-    return html, 200, {"Cache-Control": "no-cache, no-store, must-revalidate"}
+    return Template(
+        template_name="index.html",
+        context={"side_panel_enabled": settings.side_panel, "theme": settings.theme},
+    )
 
 
-@app.get("/api/ui/settings")
-async def get_ui_settings() -> ResponseReturnValue:
-    return jsonify(_settings_json(load_ui_settings()))
+@get("/api/ui/settings", sync_to_thread=False)
+def get_ui_settings() -> JsonDict:
+    return _settings_json(load_ui_settings())
 
 
-@app.post("/api/ui/settings")
-async def update_ui_settings() -> ResponseReturnValue:
+@post("/api/ui/settings", status_code=200)
+async def update_ui_settings(request: Request[Any, Any, Any]) -> Response[JsonDict]:
     """Update UI settings. Keys left out keep their current value.
 
     `side_panel` takes effect on the next page load; `theme` is applied live by the client.
     """
-    data = await request.get_json(silent=True) or {}
+    data = await _json_body(request)
     known = {"side_panel", "theme"}
     if not known & data.keys():
-        return jsonify({"error": f"expected at least one of: {', '.join(sorted(known))}"}), 400
+        return _error(400, error=f"expected at least one of: {', '.join(sorted(known))}")
 
     current = load_ui_settings()
     theme = str(data.get("theme", current.theme))
     if theme not in THEMES:
-        return jsonify({"error": f"unknown theme {theme!r}; expected one of: {', '.join(THEMES)}"}), 400
+        return _error(400, error=f"unknown theme {theme!r}; expected one of: {', '.join(THEMES)}")
 
-    settings = UiSettings(
-        side_panel=bool(data.get("side_panel", current.side_panel)),
-        theme=theme,
-    )
+    settings = UiSettings(side_panel=bool(data.get("side_panel", current.side_panel)), theme=theme)
     save_ui_settings(settings)
-    return jsonify(_settings_json(settings))
+    return Response(content=_settings_json(settings))
 
 
-@app.get("/api/tabs")
-async def list_tabs() -> ResponseReturnValue:
-    result = []
+@get("/api/tabs", sync_to_thread=False)
+def list_tabs() -> list[JsonDict]:
+    result: list[JsonDict] = []
     for t in _tabs.values():
         program, cwd = tab_proc_info(t)
         result.append(
             {"id": t.id, "label": t.label, "connected": t.connected, "alive": t.alive, "program": program, "cwd": cwd}
         )
-    return jsonify(result)
+    return result
 
 
-@app.post("/api/tabs")
-async def create_tab() -> ResponseReturnValue:
-    data = await request.get_json(silent=True) or {}
-    label: str | None = (data.get("label") or "").strip() or None
+@post("/api/tabs", status_code=200)
+async def create_tab(request: Request[Any, Any, Any]) -> JsonDict:
+    data = await _json_body(request)
+    label: str | None = str(data.get("label") or "").strip() or None
     tab = await new_bash_tab(label=label)
-    return jsonify({"id": tab.id, "label": tab.label})
+    return {"id": tab.id, "label": tab.label}
 
 
-@app.get("/github-repo")
-async def open_github_repo() -> ResponseReturnValue:
+@get("/github-repo")
+async def open_github_repo(repo: FromQuery[str] = "") -> Response[JsonDict] | Redirect:
     """Clone a GitHub repo and open it in Claude Code with the openhost-context skill loaded.
 
     GET /github-repo?repo=https://github.com/user/repo
     """
-    repo = (request.args.get("repo") or "").strip()
+    repo = repo.strip()
     if not repo:
-        return jsonify({"error": "repo is required"}), 400
+        return _error(400, error="repo is required")
     if not validate_repo_url(repo):
-        return jsonify({"error": "invalid repo URL"}), 400
+        return _error(400, error="invalid repo URL")
 
     repo_name = repo_dir_name(repo)
     dest = HOME / repo_name
@@ -157,38 +182,38 @@ async def open_github_repo() -> ResponseReturnValue:
         kind=CLAUDE,
         session_id=session_id,
     )
-    return redirect(f"/?tab={tab.id}", code=303)
+    return Redirect(f"/?tab={tab.id}", status_code=303)
 
 
-@app.post("/api/tabs/<tab_id>/kick")
-async def kick_tab_client(tab_id: str) -> ResponseReturnValue:
+@post("/api/tabs/{tab_id:str}/kick", status_code=200)
+async def kick_tab_client(tab_id: FromPath[str]) -> Response[JsonDict]:
     tab = _tabs.get(tab_id)
     if tab is None:
-        return jsonify({"error": "not_found"}), 404
+        return _error(404, error="not_found")
     try:
         await kick_tab(tab)
     except TimeoutError:
-        return jsonify({"error": "timeout"}), 504
-    return jsonify({"ok": True})
+        return _error(504, error="timeout")
+    return Response(content={"ok": True})
 
 
-@app.delete("/api/tabs/<tab_id>")
-async def delete_tab(tab_id: str) -> ResponseReturnValue:
+@delete("/api/tabs/{tab_id:str}", status_code=200)
+async def delete_tab(tab_id: FromPath[str]) -> Response[JsonDict]:
     tab = _tabs.pop(tab_id, None)
     if tab is None:
-        return jsonify({"error": "not_found"}), 404
+        return _error(404, error="not_found")
     kill_tab(tab)
-    return jsonify({"ok": True})
+    return Response(content={"ok": True})
 
 
-@app.post("/api/sessions")
-async def create_session() -> ResponseReturnValue:
+@post("/api/sessions", status_code=200)
+async def create_session(request: Request[Any, Any, Any]) -> Response[JsonDict]:
     """Reserve a prefilled Claude session."""
-    data = await request.get_json(silent=True) or {}
-    prompt: str = (data.get("prompt") or "").strip()
-    context: str = (data.get("context") or "").strip()
+    data = await _json_body(request)
+    prompt = str(data.get("prompt") or "").strip()
+    context = str(data.get("context") or "").strip()
     if not prompt and not context:
-        return jsonify({"error": "prompt or context required"}), 400
+        return _error(400, error="prompt or context required")
 
     seed_parts: list[str] = []
     if context:
@@ -212,32 +237,31 @@ async def create_session() -> ResponseReturnValue:
         kind=CLAUDE,
         session_id=session_id,
     )
-    return jsonify({"id": tab.id, "url": f"/?tab={tab.id}"})
+    return Response(content={"id": tab.id, "url": f"/?tab={tab.id}"})
 
 
-async def _read_repo_ref() -> tuple[str, str]:
+async def _read_repo_ref(request: Request[Any, Any, Any]) -> tuple[str, str]:
     repo = ""
     ref = ""
     try:
-        form = await request.form
-        repo = (form.get("repo") or "").strip()
-        ref = (form.get("ref") or "").strip()
+        form = await request.form()
+        repo = str(form.get("repo") or "").strip()
+        ref = str(form.get("ref") or "").strip()
     except Exception:
         pass
     if not (repo and ref):
-        data = await request.get_json(silent=True)
-        if isinstance(data, dict):
-            repo = repo or str(data.get("repo") or "").strip()
-            ref = ref or str(data.get("ref") or "").strip()
+        data = await _json_body(request)
+        repo = repo or str(data.get("repo") or "").strip()
+        ref = ref or str(data.get("ref") or "").strip()
     if not repo:
-        repo = (request.args.get("repo") or "").strip()
+        repo = (request.query_params.get("repo") or "").strip()
     if not ref:
-        ref = (request.args.get("ref") or "").strip()
+        ref = (request.query_params.get("ref") or "").strip()
     return repo, ref
 
 
-@app.route("/open-workspace", methods=["GET", "POST"])
-async def open_workspace() -> ResponseReturnValue:
+@route("/open-workspace", http_method=[HttpMethod.GET, HttpMethod.POST], status_code=200)
+async def open_workspace(request: Request[Any, Any, Any]) -> Response[JsonDict] | Redirect:
     """Provider for the open-workspace service (services/open-workspace/openapi.yaml).
 
     Given a `repo` clone URL and a `ref`, prepare a checkout of that repo at that commit and
@@ -250,24 +274,24 @@ async def open_workspace() -> ResponseReturnValue:
     Accepting GET means the post-login landing still resolves instead of 405-ing. Once the router
     switches to 307/308 we can drop GET here.
     """
-    repo, ref = await _read_repo_ref()
+    repo, ref = await _read_repo_ref(request)
 
     if not repo:
-        return jsonify({"error": "bad_request", "message": "repo is required"}), 400
+        return _error(400, error="bad_request", message="repo is required")
     if not validate_repo_url(repo):
-        return jsonify({"error": "bad_request", "message": "repo must be an http(s)/ssh/git@ clone url"}), 400
+        return _error(400, error="bad_request", message="repo must be an http(s)/ssh/git@ clone url")
     if not ref:
-        return jsonify({"error": "bad_request", "message": "ref is required"}), 400
+        return _error(400, error="bad_request", message="ref is required")
     if not REF_RE.match(ref):
-        return jsonify({"error": "bad_request", "message": "ref contains invalid characters"}), 400
+        return _error(400, error="bad_request", message="ref contains invalid characters")
 
     access = await resolve_access(repo, ref)
     if access.decision == "forbidden":
-        return jsonify({"error": "access_denied", "message": "no authorization to access this repository"}), 403
+        return _error(403, error="access_denied", message="no authorization to access this repository")
     if access.decision == "not_found":
-        return jsonify({"error": "not_found", "message": "repository or ref not found"}), 404
+        return _error(404, error="not_found", message="repository or ref not found")
     if access.decision == "error":
-        return jsonify({"error": "internal_error", "message": "could not reach the repository"}), 500
+        return _error(500, error="internal_error", message="could not reach the repository")
 
     env: dict[str, str] = {
         "WORKSPACE_REPO": repo,
@@ -285,34 +309,55 @@ async def open_workspace() -> ResponseReturnValue:
         # The script clones and then execs a plain shell, so that is what a restore recreates.
         kind=SHELL,
     )
-    return redirect(f"/?tab={tab.id}", code=303)
+    return Redirect(f"/?tab={tab.id}", status_code=303)
 
 
-@app.websocket("/terminal/ws")
-async def terminal_ws() -> None:
+@websocket("/terminal/ws")
+async def terminal_ws(socket: WebSocket[Any, Any, Any]) -> None:
     try:
-        await handle_terminal_ws()
+        await handle_terminal_ws(socket)
     except Exception:
         traceback.print_exc()
         raise
 
 
-async def _serve() -> None:
+async def _on_startup() -> None:
     await seed_oh_config()
     await seed_gh_auth()
     # Bring back the tabs from the previous run before any client connects, so the first page
     # load already shows them instead of racing to create a fresh one.
     await restore_tabs()
-    asyncio.create_task(persist_tabs_periodically())
+    asyncio.create_task(persist_tabs_periodically())  # noqa: RUF006
 
-    cfg = hypercorn.config.Config()
-    cfg.bind = [f"0.0.0.0:{PORT}"]
-    cfg.accesslog = "-"
-    await hypercorn.asyncio.serve(app, cfg)
+
+app = Litestar(
+    route_handlers=[
+        health,
+        index,
+        get_ui_settings,
+        update_ui_settings,
+        list_tabs,
+        create_tab,
+        open_github_repo,
+        kick_tab_client,
+        delete_tab,
+        create_session,
+        open_workspace,
+        terminal_ws,
+        create_static_files_router(path="/static", directories=[APP_DIR / "static"], cache_control=NO_CACHE),
+    ],
+    template_config=TemplateConfig(directory=APP_DIR / "templates", engine=JinjaTemplateEngine),
+    on_startup=[_on_startup],
+)
 
 
 def main() -> None:
-    asyncio.run(_serve())
+    cfg = hypercorn.config.Config()
+    cfg.bind = [f"0.0.0.0:{PORT}"]
+    cfg.accesslog = "-"
+    # hypercorn describes ASGI apps with its own Scope TypedDicts; Litestar's are structurally
+    # equivalent but nominally distinct, so the two annotations can't be reconciled.
+    asyncio.run(hypercorn.asyncio.serve(cast("Any", app), cfg))
 
 
 if __name__ == "__main__":

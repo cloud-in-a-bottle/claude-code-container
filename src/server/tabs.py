@@ -12,9 +12,10 @@ import subprocess
 import termios
 import uuid
 from pathlib import Path
+from typing import Any
 
 import attr
-from quart import websocket
+from litestar import WebSocket
 
 from server.config import HOME
 from server.config import MY_PROJECT_DIR
@@ -408,14 +409,14 @@ async def new_bash_tab(label: str | None = None) -> ServerTab:
         )
 
 
-async def handle_terminal_ws() -> None:
-    await websocket.accept()
-    tab_id = websocket.args.get("tab")
+async def handle_terminal_ws(socket: WebSocket[Any, Any, Any]) -> None:
+    await socket.accept()
+    tab_id = socket.query_params.get("tab")
     tab = _tabs.get(tab_id) if tab_id else None
     if tab is None:
         return
     if tab.lock.locked():
-        await websocket.send(b"\x01" + json.dumps({"type": "busy"}).encode())
+        await socket.send_data(b"\x01" + json.dumps({"type": "busy"}).encode(), mode="binary")
         return
 
     await tab.lock.acquire()
@@ -430,7 +431,7 @@ async def handle_terminal_ws() -> None:
     # background tabs use last known size). Without this, output_buf would be
     # written into a terminal that hasn't been sized yet, causing garbled display.
     try:
-        first_msg = await asyncio.wait_for(websocket.receive(), timeout=1.0)
+        first_msg = await asyncio.wait_for(socket.receive_data(mode="binary"), timeout=1.0)
         if isinstance(first_msg, bytes | bytearray) and len(first_msg) > 1:
             if first_msg[0] == 0x01:
                 try:
@@ -441,30 +442,30 @@ async def handle_terminal_ws() -> None:
                     pass
             elif first_msg[0] == 0x00:
                 os.write(tab.master_fd, bytes(first_msg[1:]))
-    except TimeoutError, Exception:
+    except Exception:
         pass
 
     if tab.output_buf:
-        await websocket.send(b"\x00" + bytes(tab.output_buf))
+        await socket.send_data(b"\x00" + bytes(tab.output_buf), mode="binary")
 
     async def pty_to_ws() -> None:
         try:
             while True:
                 chunk = await q.get()
                 if chunk is None:
-                    await websocket.send(b"\x01" + json.dumps({"type": "exit"}).encode())
+                    await socket.send_data(b"\x01" + json.dumps({"type": "exit"}).encode(), mode="binary")
                     break
                 if chunk is _KICKED_MSG:
-                    await websocket.send(_KICKED_MSG)
+                    await socket.send_data(_KICKED_MSG, mode="binary")
                     break
-                await websocket.send(b"\x00" + chunk)
+                await socket.send_data(b"\x00" + chunk, mode="binary")
         except Exception:
             pass
 
     async def ws_to_pty() -> None:
         try:
             while True:
-                msg = await websocket.receive()
+                msg = await socket.receive_data(mode="binary")
                 if isinstance(msg, bytes | bytearray) and len(msg) > 0:
                     kind = msg[0]
                     payload = bytes(msg[1:])

@@ -5,10 +5,10 @@ description = "Tabbed in-browser terminals preloaded with Claude Code, for build
 requires-python = "==3.14.*"
 dependencies = [
     "attrs==26.1.0",
-    "quart==0.20.0",
     "hypercorn==0.18.0",
     "httpx==0.28.1",
     "tomli-w==1.2.0",
+    "litestar[jinja]>=2.24.0",
 ]
 
 [dependency-groups]
