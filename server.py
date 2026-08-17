@@ -14,6 +14,7 @@ from tabs import (
     kick_tab,
     kill_tab,
     new_bash_tab,
+    new_session_id,
     persist_tabs_periodically,
     restore_tabs,
     set_active_cwd,
@@ -117,10 +118,12 @@ async def open_github_repo() -> ResponseReturnValue:
     set_active_cwd(str(dest))
 
     key = await get_anthropic_key()
+    session_id = new_session_id()
     env: dict[str, str] = {
         "GITHUB_REPO": repo,
         "GITHUB_DIR": str(dest),
         "CLAUDE_BIN": shutil.which("claude") or "claude",
+        "CLAUDE_SESSION_ID": session_id,
     }
     if key:
         env["ANTHROPIC_API_KEY"] = key
@@ -133,6 +136,7 @@ async def open_github_repo() -> ResponseReturnValue:
         # The script clones and then hands over to Claude; a restore must re-enter that
         # conversation in the checkout, never re-run the clone.
         kind=CLAUDE,
+        session_id=session_id,
     )
     return redirect(f"/?tab={tab.id}", code=303)
 
@@ -179,13 +183,15 @@ async def create_session() -> ResponseReturnValue:
     if key:
         env["ANTHROPIC_API_KEY"] = key
 
+    session_id = new_session_id()
     tab = await create_server_tab(
-        command=["claude", "--dangerously-skip-permissions"],
+        command=["claude", "--session-id", session_id, "--dangerously-skip-permissions"],
         stdin_seed=seed,
         cwd=str(OPENHOST_DIR if OPENHOST_DIR.exists() else HOME),
         env=env,
         label="claude",
         kind=CLAUDE,
+        session_id=session_id,
     )
     return jsonify({"id": tab.id, "url": f"/?tab={tab.id}"})
 

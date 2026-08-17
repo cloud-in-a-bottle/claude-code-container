@@ -10,6 +10,7 @@ import signal
 import struct
 import subprocess
 import termios
+import uuid
 from pathlib import Path
 
 import attr
@@ -27,6 +28,26 @@ _tab_counter: int = 0
 _claude_tab_created: bool = False
 _active_cwd: str | None = None  # set via set_active_cwd(); used as cwd for all new tabs
 _last_persisted: list["PersistedTab"] = []
+_restoring: bool = False  # see restore_tabs(): suppresses the partial writes a restore would make
+
+
+def new_session_id() -> str:
+    """A stable id for one tab's Claude conversation. Must be a UUID; `claude --session-id` demands it."""
+    return str(uuid.uuid4())
+
+
+def claude_session_command(claude_bin: str, session_id: str, *, resume_first: bool) -> str:
+    """Shell snippet that lands the user in `session_id`, whether or not it exists yet.
+
+    Both orderings work — the loser of the pair just exits non-zero — so the order only decides
+    whether the user sees a spurious error first. Lead with resume when the session is expected to
+    exist (a restore) and with create when it isn't (a brand new tab).
+    """
+    claude = shlex.quote(claude_bin)
+    sid = shlex.quote(session_id)
+    create = f"{claude} --session-id {sid} --dangerously-skip-permissions"
+    resume = f"{claude} --resume {sid} --dangerously-skip-permissions"
+    return f"{resume} || {create}" if resume_first else f"{create} || {resume}"
 
 
 def set_active_cwd(path: str) -> None:
@@ -100,6 +121,7 @@ class ServerTab:
     # start_cwd is the fallback for when the live cwd can't be read (the process has exited).
     kind: str = SHELL
     start_cwd: str = str(HOME)
+    session_id: str = ""
     lock: asyncio.Lock = attr.Factory(asyncio.Lock)
     connected: bool = False
     alive: bool = True
@@ -155,6 +177,7 @@ async def create_server_tab(
     label: str | None = None,
     kind: str = SHELL,
     tab_id: str | None = None,
+    session_id: str = "",
 ) -> ServerTab:
     """Start a tab. `kind` is what a restore should recreate, not necessarily what `command` runs.
 
@@ -189,6 +212,7 @@ async def create_server_tab(
         proc=proc,
         kind=kind,
         start_cwd=cwd or str(HOME),
+        session_id=session_id,
     )
     _tabs[tab_id] = tab
 
@@ -224,13 +248,19 @@ def _tab_cwd(tab: ServerTab) -> str:
 def tab_snapshot() -> list[PersistedTab]:
     """The live tabs, in the form a restore needs. Dead tabs are dropped rather than resurrected."""
     return [
-        PersistedTab(id=t.id, label=t.label, kind=t.kind, cwd=_tab_cwd(t)) for t in _tabs.values() if t.alive
+        PersistedTab(id=t.id, label=t.label, kind=t.kind, cwd=_tab_cwd(t), session_id=t.session_id)
+        for t in _tabs.values()
+        if t.alive
     ]
 
 
 def persist_tabs() -> None:
     """Write the tab list, skipping the write when nothing has changed since last time."""
     global _last_persisted
+    # Mid-restore the live set is only the tabs rebuilt so far, and create_server_tab() would
+    # persist that partial list over the full one. Dying in that window would lose the rest.
+    if _restoring:
+        return
     snapshot = tab_snapshot()
     if snapshot == _last_persisted:
         return
@@ -250,23 +280,25 @@ async def persist_tabs_periodically(interval_seconds: float = 30.0) -> None:
         persist_tabs()
 
 
-def restore_command(kind: str, claude_bin: str) -> list[str]:
+def restore_command(kind: str, claude_bin: str, session_id: str = "", *, continue_ok: bool = True) -> list[str]:
     """The command that brings a tab of this kind back.
 
-    Claude tabs re-enter the last conversation for that directory; `--continue` exits non-zero when
-    there isn't one (a brand new checkout, or a cleared history), so fall through to a fresh
-    session rather than dumping the user at a bare shell.
+    A tab with a session id reattaches to that exact conversation, so two Claude tabs in one
+    directory come back as two distinct conversations. Tabs persisted before session ids existed
+    fall back to `--continue`, which resolves per-directory and so can only be trusted when the tab
+    is landing in the directory it left; `continue_ok=False` says it isn't. Every branch falls
+    through to a fresh session rather than dumping the user at a bare shell.
     """
     if kind != CLAUDE:
         return ["bash", "-l"]
     claude = shlex.quote(claude_bin)
-    return [
-        "bash",
-        "-l",
-        "-c",
-        f"{claude} --continue --dangerously-skip-permissions "
-        f"|| {claude} --dangerously-skip-permissions; exec bash",
-    ]
+    if session_id:
+        attempt = claude_session_command(claude_bin, session_id, resume_first=True)
+    elif continue_ok:
+        attempt = f"{claude} --continue --dangerously-skip-permissions || {claude} --dangerously-skip-permissions"
+    else:
+        attempt = f"{claude} --dangerously-skip-permissions"
+    return ["bash", "-l", "-c", f"{attempt}; exec bash"]
 
 
 async def restore_tabs() -> list[ServerTab]:
@@ -274,7 +306,7 @@ async def restore_tabs() -> list[ServerTab]:
 
     Called once at startup, before any client connects.
     """
-    global _claude_tab_created
+    global _claude_tab_created, _restoring
     persisted = load_tabs()
     if not persisted:
         return []
@@ -284,19 +316,25 @@ async def restore_tabs() -> list[ServerTab]:
     claude_bin = shutil.which("claude") or "claude"
 
     restored: list[ServerTab] = []
-    for entry in persisted:
-        # The directory can be gone — a repo removed, or a temp dir cleaned up between runs.
-        cwd = entry.cwd if Path(entry.cwd).is_dir() else str(HOME)
-        restored.append(
-            await create_server_tab(
-                command=restore_command(entry.kind, claude_bin),
-                cwd=cwd,
-                env=env,
-                label=entry.label,
-                kind=entry.kind,
-                tab_id=entry.id,
+    _restoring = True
+    try:
+        for entry in persisted:
+            # The directory can be gone — a repo removed, or a temp dir cleaned up between runs.
+            cwd_ok = Path(entry.cwd).is_dir()
+            restored.append(
+                await create_server_tab(
+                    command=restore_command(entry.kind, claude_bin, entry.session_id, continue_ok=cwd_ok),
+                    cwd=entry.cwd if cwd_ok else str(HOME),
+                    env=env,
+                    label=entry.label,
+                    kind=entry.kind,
+                    tab_id=entry.id,
+                    session_id=entry.session_id,
+                )
             )
-        )
+    finally:
+        _restoring = False
+    persist_tabs()
     # Whatever the restored mix is, the "first tab runs Claude" rule has already had its say.
     _claude_tab_created = True
     print(f"[tabs] restored {len(restored)} tab(s) from the previous run", flush=True)
@@ -339,17 +377,22 @@ async def new_bash_tab(label: str | None = None) -> ServerTab:
             env["ANTHROPIC_API_KEY"] = key
         claude_bin = shutil.which("claude") or "claude"
         cwd = _active_cwd or (str(MY_PROJECT_DIR) if MY_PROJECT_DIR.exists() else str(HOME))
+        session_id = new_session_id()
+        # A retry that follows a crash must rejoin the session the crashed attempt created, not
+        # collide with it — claude rejects --session-id for an id that already exists.
+        attempt = claude_session_command(claude_bin, session_id, resume_first=False)
         return await create_server_tab(
             command=[
                 "bash",
                 "-l",
                 "-c",
-                f"for _i in 1 2 3; do {claude_bin} --dangerously-skip-permissions && break; sleep 1; done; exec bash",
+                f"for _i in 1 2 3; do {{ {attempt}; }} && break; sleep 1; done; exec bash",
             ],
             cwd=cwd,
             env=env,
             label=label,
             kind=CLAUDE,
+            session_id=session_id,
         )
     else:
         return await create_server_tab(
