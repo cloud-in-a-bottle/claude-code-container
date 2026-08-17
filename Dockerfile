@@ -81,6 +81,12 @@ RUN echo '[ -r /etc/profile.d/workbench.sh ] && . /etc/profile.d/workbench.sh' \
         >> /etc/bash.bashrc \
     && chmod +x /app/entrypoint.sh /app/github_repo.sh
 
+# Marks this build. Must stay after every COPY above: a change to any copied file invalidates the
+# cache from that point on, so this regenerates exactly when the image content actually changed,
+# and stays put when a rebuild is a pure cache hit. entrypoint.sh compares it against the copy it
+# left in ~/claude-code-container to tell an app update apart from a container restart.
+RUN date -u +%Y-%m-%dT%H:%M:%SZ > /app/.image-stamp
+
 WORKDIR /root
 
 # Install the `oh` openhost CLI. uv fetches Python 3.12 automatically

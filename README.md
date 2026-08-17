@@ -15,6 +15,30 @@ point for building or debugging openhost apps.
   or `OPENHOST_DIR` env vars).
 - A Claude Code skill at `~/.claude/skills/openhost/` that points Claude
   at the curated docs in the local openhost clone.
+- A checkout of this repo at `~/claude-code-container`, so you can work on
+  the workbench from inside the workbench (override with `WORKBENCH_REPO_URL`
+  or `WORKBENCH_DIR`). See the warning below before editing it.
+
+### Editing the workbench from inside itself
+
+> **Local edits in `~/claude-code-container` are not durable.** If you're
+> reading this file there, that includes this one.
+
+The checkout tracks the repo's default branch, so it can be *ahead of* the
+image you're actually running — it's a convenience for hacking on the
+workbench, not a record of what got built.
+
+When the app is updated from outside (a rebuild via the dashboard, `oh app
+reload --update`, or a redeploy), the entrypoint resets that checkout to the
+remote with `git reset --hard` and `git clean -fd`, discarding anything
+uncommitted. An ordinary container restart does *not* do this — the entrypoint
+compares `/app/.image-stamp`, which only changes when the image is rebuilt with
+new content, so restarts leave your work alone.
+
+Push anything you want to keep, and treat the checkout as disposable. The
+resync is deliberately best-effort and never fails startup: if GitHub is
+unreachable or git is unhappy, it logs a warning, leaves the directory as it
+is, and the workbench boots anyway.
 
 Authentication for `claude` is whatever the user sets up inside the
 terminal — either `ANTHROPIC_API_KEY` in the environment or an interactive
