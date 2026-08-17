@@ -12,7 +12,7 @@ health_check = "/health"
 
 [resources]
 memory_mb = 4096
-cpu_millicores = 1000
+cpu_cores = 1.0
 
 # claude-workbench is the first provider of the open-workspace service: a valid
 # repo + ref redirects the user into a checkout of that repo at that commit.

@@ -6,8 +6,8 @@ import urllib.parse
 
 import attr
 
-from config import APP_DIR
-from remote_services import fetch_github_token
+from server.config import APP_DIR
+from server.remote_services import fetch_github_token
 
 # A git ref/sha: no leading dash (would be read as a `git checkout` flag) and a conservative
 # character set.

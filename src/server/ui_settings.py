@@ -2,7 +2,7 @@ import json
 
 import attr
 
-from config import HOME
+from server.config import HOME
 
 # Under $HOME rather than /app: openhost points HOME at the app's persistent data dir, so the
 # user's choices survive image rebuilds. Anything written into /app does not.

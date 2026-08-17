@@ -16,18 +16,23 @@ from pathlib import Path
 import attr
 from quart import websocket
 
-from config import HOME, MY_PROJECT_DIR
-from remote_services import get_anthropic_key
-from tab_store import CLAUDE, SHELL, PersistedTab, load_tabs, save_tabs
+from server.config import HOME
+from server.config import MY_PROJECT_DIR
+from server.remote_services import get_anthropic_key
+from server.tab_store import CLAUDE
+from server.tab_store import SHELL
+from server.tab_store import PersistedTab
+from server.tab_store import load_tabs
+from server.tab_store import save_tabs
 
 _BUF_MAX = 100 * 1024  # 100 KB ring buffer per tab
 _KICKED_MSG = b"\x01" + json.dumps({"type": "kicked"}).encode()
 
-_tabs: dict[str, "ServerTab"] = {}
+_tabs: dict[str, ServerTab] = {}
 _tab_counter: int = 0
 _claude_tab_created: bool = False
 _active_cwd: str | None = None  # set via set_active_cwd(); used as cwd for all new tabs
-_last_persisted: list["PersistedTab"] = []
+_last_persisted: list[PersistedTab] = []
 _restoring: bool = False  # see restore_tabs(): suppresses the partial writes a restore would make
 
 
@@ -78,7 +83,7 @@ def _proc_name(pgid: int) -> str:
     return comm
 
 
-def tab_proc_info(tab: "ServerTab") -> tuple[str, str]:
+def tab_proc_info(tab: ServerTab) -> tuple[str, str]:
     """Return (program, cwd) for the foreground process of a tab's PTY.
 
     program is '' when the foreground is bash/unknown.
@@ -284,10 +289,10 @@ def restore_command(kind: str, claude_bin: str, session_id: str = "", *, continu
     """The command that brings a tab of this kind back.
 
     A tab with a session id reattaches to that exact conversation, so two Claude tabs in one
-    directory come back as two distinct conversations. Tabs persisted before session ids existed
-    fall back to `--continue`, which resolves per-directory and so can only be trusted when the tab
-    is landing in the directory it left; `continue_ok=False` says it isn't. Every branch falls
-    through to a fresh session rather than dumping the user at a bare shell.
+    directory come back as two distinct conversations. Without one, `--continue` is the best
+    available: it resolves per-directory, so it can only be trusted when the tab is landing in the
+    directory it left; `continue_ok=False` says it isn't. Every branch falls through to a fresh
+    session rather than dumping the user at a bare shell.
     """
     if kind != CLAUDE:
         return ["bash", "-l"]
@@ -436,7 +441,7 @@ async def handle_terminal_ws() -> None:
                     pass
             elif first_msg[0] == 0x00:
                 os.write(tab.master_fd, bytes(first_msg[1:]))
-    except (TimeoutError, Exception):
+    except TimeoutError, Exception:
         pass
 
     if tab.output_buf:

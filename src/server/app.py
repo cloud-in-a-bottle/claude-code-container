@@ -1,27 +1,46 @@
 import asyncio
 import shutil
+import traceback
 
-from quart import Quart, Response, jsonify, redirect, render_template, request
+import hypercorn.asyncio
+import hypercorn.config
+from quart import Quart
+from quart import Response
+from quart import jsonify
+from quart import redirect
+from quart import render_template
+from quart import request
 from quart.typing import ResponseReturnValue
 
-from config import APP_DIR, HOME, OPENHOST_DIR, PORT
-from remote_services import get_anthropic_key, seed_gh_auth, seed_oh_config
-from tab_store import CLAUDE, SHELL
-from tabs import (
-    _tabs,
-    create_server_tab,
-    handle_terminal_ws,
-    kick_tab,
-    kill_tab,
-    new_bash_tab,
-    new_session_id,
-    persist_tabs_periodically,
-    restore_tabs,
-    set_active_cwd,
-    tab_proc_info,
-)
-from ui_settings import THEMES, UiSettings, load_ui_settings, save_ui_settings
-from workspace import REF_RE, WORKSPACE_SCRIPT, repo_dir_name, resolve_access, validate_repo_url
+from server.config import APP_DIR
+from server.config import HOME
+from server.config import OPENHOST_DIR
+from server.config import PORT
+from server.remote_services import get_anthropic_key
+from server.remote_services import seed_gh_auth
+from server.remote_services import seed_oh_config
+from server.tab_store import CLAUDE
+from server.tab_store import SHELL
+from server.tabs import _tabs
+from server.tabs import create_server_tab
+from server.tabs import handle_terminal_ws
+from server.tabs import kick_tab
+from server.tabs import kill_tab
+from server.tabs import new_bash_tab
+from server.tabs import new_session_id
+from server.tabs import persist_tabs_periodically
+from server.tabs import restore_tabs
+from server.tabs import set_active_cwd
+from server.tabs import tab_proc_info
+from server.ui_settings import THEMES
+from server.ui_settings import UiSettings
+from server.ui_settings import load_ui_settings
+from server.ui_settings import save_ui_settings
+from server.workspace import REF_RE
+from server.workspace import WORKSPACE_SCRIPT
+from server.workspace import repo_dir_name
+from server.workspace import resolve_access
+from server.workspace import validate_repo_url
 
 GITHUB_REPO_SCRIPT = APP_DIR / "github_repo.sh"
 
@@ -274,16 +293,11 @@ async def terminal_ws() -> None:
     try:
         await handle_terminal_ws()
     except Exception:
-        import traceback
-
         traceback.print_exc()
         raise
 
 
 async def _serve() -> None:
-    import hypercorn.asyncio
-    import hypercorn.config
-
     await seed_oh_config()
     await seed_gh_auth()
     # Bring back the tabs from the previous run before any client connects, so the first page

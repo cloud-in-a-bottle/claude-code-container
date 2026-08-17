@@ -1,7 +1,8 @@
 [project]
 name = "claude-workbench"
 version = "0.1.0"
-requires-python = ">=3.12"
+description = "Tabbed in-browser terminals preloaded with Claude Code, for building and debugging openhost apps."
+requires-python = "==3.14.*"
 dependencies = [
     "attrs==26.1.0",
     "quart==0.20.0",
@@ -12,26 +13,59 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "mypy==1.16.0",
-    "pre-commit==4.2.0",
-    "pytest==9.0.3",
-    "ruff==0.11.13",
+    # Unpinned; uv.lock fixes the versions.
+    "mypy",
+    "pre-commit",
+    "pytest>=8.0",
+    "ruff",
+    "pytest-playwright",
+    "playwright",
+    # Builds the app's Dockerfile, runs it under podman with the mounts/env its
+    # openhost.toml declares, and fronts it with the real OpenHost router. Only the
+    # `integration` tests use it; requires podman on the host.
+    "openhost[test-harness] @ git+https://github.com/imbue-openhost/openhost@main",
 ]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/server"]
+
+[tool.pytest.ini_options]
+# Integration tests build the container image, so they stay out of the default run.
+addopts = "-v -m 'not integration'"
+markers = ["integration: builds the Dockerfile and runs it under podman"]
 
 [tool.ruff]
 line-length = 119
+exclude = []
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP"]
+select = [
+    "E",       # pycodestyle errors
+    "F",       # pyflakes
+    "B",       # flake8-bugbear
+    "UP",      # pyupgrade (modern Python syntax)
+    "I",       # isort
+    "PLC0415", # import-outside-top-level
+]
+ignore = ["E501"] # line length handled by formatter
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.ruff.lint.isort]
+force-single-line = true
+case-sensitive = true
+known-first-party = ["server"]
 
 [tool.mypy]
 python_version = "3.14"
-disallow_untyped_defs = true
-disallow_any_generics = true
-warn_return_any = true
-warn_unused_ignores = true
-no_implicit_optional = true
-
-[[tool.mypy.overrides]]
-module = ["test_open_workspace"]
-warn_return_any = false
+mypy_path = ["src"]
+packages = ["server"]
+strict = true
+ignore_missing_imports = true
+exclude = []

@@ -88,4 +88,4 @@ for skill_src in /app/skills/*/; do
 done
 
 export OPENHOST_DIR
-exec python3 /app/server.py
+exec python3 -m server.app
