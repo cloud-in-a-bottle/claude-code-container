@@ -1,0 +1,9 @@
+.git
+# Load-bearing: a host .venv here would overlay the image's /app/.venv.
+.venv
+__pycache__/
+*.pyc
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
