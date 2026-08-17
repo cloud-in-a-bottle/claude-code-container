@@ -4,7 +4,7 @@ import shutil
 from quart import Quart, Response, jsonify, redirect, render_template, request
 from quart.typing import ResponseReturnValue
 
-from config import APP_DIR, HOME, OPENHOST_DIR, PORT
+from config import APP_DIR, BIND_HOST, HOME, OPENHOST_DIR, PORT
 from remote_services import get_anthropic_key, seed_gh_auth, seed_oh_config
 from tab_store import CLAUDE, SHELL
 from tabs import (
@@ -286,7 +286,7 @@ async def _serve() -> None:
     asyncio.create_task(persist_tabs_periodically())
 
     cfg = hypercorn.config.Config()
-    cfg.bind = [f"0.0.0.0:{PORT}"]
+    cfg.bind = [f"{BIND_HOST}:{PORT}"]
     cfg.accesslog = "-"
     await hypercorn.asyncio.serve(app, cfg)
 

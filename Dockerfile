@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git ca-certificates curl wget tini bash less vim sudo \
         htop tree jq ripgrep fd-find fzf tmux ncdu \
         unzip zip file man-db gnupg \
+        openssh-server \
     && rm -rf /var/lib/apt/lists/*
 
 # Node.js 20 from NodeSource — Ubuntu's own nodejs package lags badly.
@@ -35,6 +36,23 @@ RUN set -eux; \
         -o /tmp/glab.tar.gz; \
     tar -xzf /tmp/glab.tar.gz -C /usr/local bin/glab; \
     rm /tmp/glab.tar.gz
+
+# chisel — TCP-over-HTTP tunnel. Runs as the container front-door (see tunnel.sh) so external ssh
+# can reach the in-container sshd over the app's HTTPS subdomain. Official release is a gzipped
+# single binary, one per arch (no apt repo).
+ARG CHISEL_VERSION=1.11.7
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+        amd64|arm64) ;; \
+        *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://github.com/jpillora/chisel/releases/download/v${CHISEL_VERSION}/chisel_${CHISEL_VERSION}_linux_${arch}.gz" \
+        -o /tmp/chisel.gz; \
+    gunzip -c /tmp/chisel.gz > /usr/local/bin/chisel; \
+    chmod +x /usr/local/bin/chisel; \
+    rm /tmp/chisel.gz; \
+    chisel --version
 
 RUN npm install -g @anthropic-ai/claude-code@latest
 
@@ -67,6 +85,9 @@ COPY workspace.py /app/workspace.py
 COPY server.py /app/server.py
 COPY open_workspace.sh /app/open_workspace.sh
 COPY github_repo.sh /app/github_repo.sh
+COPY tunnel.sh /app/tunnel.sh
+COPY sshd_config /app/sshd_config
+COPY scripts /app/scripts
 COPY templates /app/templates
 COPY static /app/static
 COPY skills /app/skills
@@ -79,7 +100,8 @@ COPY entrypoint.sh /app/entrypoint.sh
 COPY workbench.sh /etc/profile.d/workbench.sh
 RUN echo '[ -r /etc/profile.d/workbench.sh ] && . /etc/profile.d/workbench.sh' \
         >> /etc/bash.bashrc \
-    && chmod +x /app/entrypoint.sh /app/github_repo.sh
+    && chmod +x /app/entrypoint.sh /app/github_repo.sh /app/tunnel.sh /app/scripts/*.sh \
+    && mkdir -p /run/sshd
 
 # Marks this build. Must stay after every COPY above: a change to any copied file invalidates the
 # cache from that point on, so this regenerates exactly when the image content actually changed,

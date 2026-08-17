@@ -1,0 +1,24 @@
+# sshd config for the workbench. sshd binds loopback only and is never mapped to a host port:
+# the sole way in is the chisel tunnel (see tunnel.sh + README). Runtime-specific bits (host key,
+# AuthorizedKeysFile, PidFile) are passed as `-o`/`-h` overrides by tunnel.sh so this file can stay
+# static in the image while those paths live on the persistent data dir.
+
+# Loopback only. External reach is exclusively via `chisel client ... 2222:localhost:22`, which
+# lands on this port from inside the container's network namespace.
+ListenAddress 127.0.0.1
+Port 22
+
+# Key-based auth for root only. Passwords and keyboard-interactive are off; the container has no
+# root password anyway, but be explicit so a future base-image change can't silently open it up.
+PermitRootLogin prohibit-password
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+
+# PAM pulls in host-account machinery we don't have in the container and can block login under
+# no-new-privileges; key auth doesn't need it.
+UsePAM no
+
+PrintMotd no
+AcceptEnv LANG LC_*
+Subsystem sftp /usr/lib/openssh/sftp-server

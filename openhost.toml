@@ -1,6 +1,6 @@
 [app]
 name = "claude-workbench"
-version = "0.1.0"
+version = "0.2.0"
 description = "Tabbed terminals preloaded with Claude Code and a cloned openhost repo, for building and debugging openhost apps."
 
 [runtime.container]
@@ -9,6 +9,11 @@ port = 5000
 
 [routing]
 health_check = "/health"
+# The chisel tunnel endpoint must be reachable without an openhost session cookie: the external
+# `chisel client` has no browser login. Security is chisel's own --auth credential plus ssh key
+# auth (defense in depth), not the openhost session. Everything else stays auth-gated. See
+# README "SSH access". The path is served by the chisel front-door (tunnel.sh), not the Quart app.
+public_paths = ["/_chisel"]
 
 [resources]
 memory_mb = 4096
@@ -39,6 +44,11 @@ version = ">=0.1.0"
 grants = [
     {key = "ANTHROPIC_API_KEY"},
     {key = "OH_TOKEN"},
+    # Optional SSH-over-chisel plumbing (see README "SSH access"). Both are best-effort: if unset,
+    # SSH_AUTHORIZED_KEYS falls back to keys the user adds by hand in a terminal, and CHISEL_AUTH
+    # falls back to a persisted auto-generated credential.
+    {key = "SSH_AUTHORIZED_KEYS"},
+    {key = "CHISEL_AUTH"},
 ]
 
 # Mint a transient GitHub token so open-workspace can clone private repos that

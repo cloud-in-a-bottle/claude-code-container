@@ -88,4 +88,6 @@ for skill_src in /app/skills/*/; do
 done
 
 export OPENHOST_DIR
-exec python3 /app/server.py
+# tunnel.sh runs the Quart app behind a chisel front-door and starts an in-container sshd, so the
+# workbench is reachable over ssh through the same HTTPS subdomain (see README "SSH access").
+exec /app/tunnel.sh

@@ -55,6 +55,50 @@ alias l='ls -CF'
 
 alias claude='claude --dangerously-skip-permissions'
 
+# Interactive login banner: SSH-over-chisel connection details. tunnel.sh persists the chisel
+# credential and manages authorized_keys; surface both here so a user in a terminal knows how to
+# connect from outside and whether they still need to add their key. Only shown once the tunnel has
+# provisioned its credential file.
+if [ -f "$HOME/.ssh/chisel-auth" ]; then
+    _wb_app="${OPENHOST_APP_NAME:-claude-workbench}"
+    _wb_zone="${OPENHOST_ZONE_DOMAIN:-<zone>}"
+    _wb_url="https://${_wb_app}.${_wb_zone#https://}"
+    cat <<EOF
+────────────────────────────────────────────────────────────────
+  SSH into this workbench from your own machine (via chisel):
+
+  1. In this workbench terminal, add your LOCAL machine's PUBLIC ssh key:
+
+      echo 'ssh-ed25519 AAAA... you@host' >> ~/.ssh/authorized_keys
+
+  2. On your local machine, open the tunnel and ssh in:
+
+      chisel client --auth '$(cat "$HOME/.ssh/chisel-auth")' \\
+        ${_wb_url}/_chisel 2222:localhost:22 &
+      ssh -p 2222 root@localhost
+
+  Or, if you have this repo's helper script locally:
+      CHISEL_AUTH='$(cat "$HOME/.ssh/chisel-auth")' \\
+        ./scripts/ssh-connect.sh ${_wb_url}
+
+  To rotate this chisel credential from inside the workbench:
+      /app/scripts/rotate-chisel-auth.sh
+EOF
+    if [ -s "$HOME/.ssh/authorized_keys" ] || [ -s "$HOME/.ssh/authorized_keys.secret" ]; then
+        cat <<'EOF'
+
+  ✓ At least one ssh public key is already installed for sshd.
+EOF
+    else
+        cat <<'EOF'
+
+  ⚠ No ssh public key appears to be installed yet; step 1 is required.
+EOF
+    fi
+    unset _wb_app _wb_zone _wb_url
+    echo "────────────────────────────────────────────────────────────────"
+fi
+
 # Interactive login banner: prompt to configure the `oh` CLI if no config
 # exists yet. The workbench tries to seed this file on startup using the
 # OPENHOST_ZONE_DOMAIN env var for the hostname and the OH_TOKEN secret from
