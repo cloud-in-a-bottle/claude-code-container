@@ -5,7 +5,7 @@ import subprocess
 import httpx
 import tomli_w
 
-from config import HOME
+from server.config import HOME
 
 ROUTER_URL = os.environ.get("OPENHOST_ROUTER_URL", "")
 APP_TOKEN = os.environ.get("OPENHOST_APP_TOKEN", "")
@@ -94,11 +94,13 @@ async def seed_gh_auth() -> None:
     try:
         already = await loop.run_in_executor(
             None,
-            lambda: subprocess.run(
-                ["gh", "auth", "status"],
-                capture_output=True,
-            ).returncode
-            == 0,
+            lambda: (
+                subprocess.run(
+                    ["gh", "auth", "status"],
+                    capture_output=True,
+                ).returncode
+                == 0
+            ),
         )
         if already:
             return

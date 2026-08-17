@@ -2,26 +2,27 @@ from __future__ import annotations
 
 import asyncio
 import urllib.parse
-from collections.abc import Coroutine, Generator
-from typing import Any, TypeVar
+from collections.abc import Coroutine
+from collections.abc import Generator
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from litestar import Litestar
+from litestar.testing import TestClient
 
-import server
-import tab_store
-import tabs
-import workspace
-
-_T = TypeVar("_T")
+from server import app as srv
+from server import tab_store
+from server import tabs
+from server import workspace
 
 
-def run(coro: Coroutine[Any, Any, _T]) -> _T:
+def run[T](coro: Coroutine[Any, Any, T]) -> T:
     return asyncio.run(coro)
 
 
 @pytest.fixture(autouse=True)
-def clear_tabs() -> Generator[None, None, None]:
+def clear_tabs() -> Generator[None]:
     tabs._tabs.clear()
     yield
     tabs._tabs.clear()
@@ -177,7 +178,7 @@ def _stub_access(monkeypatch: pytest.MonkeyPatch, decision: str, token: str = ""
     async def fake(repo: str, ref: str) -> workspace.RepoAccess:
         return workspace.RepoAccess(decision=decision, token=token)
 
-    monkeypatch.setattr(server, "resolve_access", fake)
+    monkeypatch.setattr(srv, "resolve_access", fake)
 
 
 def _stub_create_tab(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
@@ -199,8 +200,12 @@ def _stub_create_tab(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
         created.append({"command": command, "cwd": cwd, "env": env or {}, "label": label, "kind": kind})
         return tab
 
-    monkeypatch.setattr(server, "create_server_tab", fake)
+    monkeypatch.setattr(srv, "create_server_tab", fake)
     return created
+
+
+def _client() -> TestClient[Litestar]:
+    return TestClient(app=srv.app)
 
 
 def _post(
@@ -210,17 +215,12 @@ def _post(
 ) -> Any:
     kwargs: dict[str, Any] = {}
     if form is not None:
-        kwargs["form"] = form
+        kwargs["data"] = form
     if json is not None:
         kwargs["json"] = json
     if query is not None:
-        kwargs["query_string"] = query
-
-    async def go() -> Any:
-        client = server.app.test_client()
-        return await client.post("/open-workspace", **kwargs)
-
-    return run(go())
+        kwargs["params"] = query
+    return _client().post("/open-workspace", follow_redirects=False, **kwargs)
 
 
 def test_missing_repo_is_400(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -395,22 +395,13 @@ def test_accepts_get_with_query(monkeypatch: pytest.MonkeyPatch) -> None:
     _stub_access(monkeypatch, "ok")
     _stub_create_tab(monkeypatch)
 
-    async def go() -> Any:
-        client = server.app.test_client()
-        return await client.get(
-            "/open-workspace",
-            query_string={"repo": "https://github.com/o/r.git", "ref": "main"},
-        )
-
-    resp = run(go())
+    resp = _client().get(
+        "/open-workspace", params={"repo": "https://github.com/o/r.git", "ref": "main"}, follow_redirects=False
+    )
     assert resp.status_code == 303
     assert resp.headers["Location"].startswith("/?tab=")
 
 
 def test_debug_route_is_gone() -> None:
-    async def go() -> Any:
-        client = server.app.test_client()
-        return await client.get("/debug", query_string={"repo": "https://github.com/o/r.git"})
-
-    resp = run(go())
+    resp = _client().get("/debug", params={"repo": "https://github.com/o/r.git"})
     assert resp.status_code == 404

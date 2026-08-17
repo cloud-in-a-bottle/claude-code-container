@@ -1,23 +1,20 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import re
-from collections.abc import Coroutine
 from pathlib import Path
-from typing import Any, TypeVar
 
 import pytest
+from litestar import Litestar
+from litestar.testing import TestClient
 
-import server
-import ui_settings
-from ui_settings import UiSettings
-
-_T = TypeVar("_T")
+from server import app as srv
+from server import ui_settings
+from server.ui_settings import UiSettings
 
 
-def run(coro: Coroutine[Any, Any, _T]) -> _T:
-    return asyncio.run(coro)
+def _client() -> TestClient[Litestar]:
+    return TestClient(app=srv.app)
 
 
 @pytest.fixture(autouse=True)
@@ -80,36 +77,24 @@ def test_malformed_file_raises(settings_path: Path) -> None:
 
 
 def test_get_settings_reports_default() -> None:
-    async def go() -> None:
-        client = server.app.test_client()
-        resp = await client.get("/api/ui/settings")
-        assert resp.status_code == 200
-        assert await resp.get_json() == {"side_panel": False, "theme": "dark"}
-
-    run(go())
+    resp = _client().get("/api/ui/settings")
+    assert resp.status_code == 200
+    assert resp.json() == {"side_panel": False, "theme": "dark"}
 
 
 def test_post_settings_persists(settings_path: Path) -> None:
-    async def go() -> None:
-        client = server.app.test_client()
-        resp = await client.post("/api/ui/settings", json={"side_panel": True})
-        assert resp.status_code == 200
-        assert await resp.get_json() == {"side_panel": True, "theme": "dark"}
-
-        resp = await client.get("/api/ui/settings")
-        assert await resp.get_json() == {"side_panel": True, "theme": "dark"}
-
-    run(go())
+    client = _client()
+    resp = client.post("/api/ui/settings", json={"side_panel": True})
+    assert resp.status_code == 200
+    assert resp.json() == {"side_panel": True, "theme": "dark"}
+    assert client.get("/api/ui/settings").json() == {"side_panel": True, "theme": "dark"}
     assert ui_settings.load_ui_settings() == UiSettings(side_panel=True)
 
 
 def test_post_without_any_known_key_is_400() -> None:
-    async def go() -> None:
-        client = server.app.test_client()
-        assert (await client.post("/api/ui/settings", json={})).status_code == 400
-        assert (await client.post("/api/ui/settings", json={"nope": 1})).status_code == 400
-
-    run(go())
+    client = _client()
+    assert client.post("/api/ui/settings", json={}).status_code == 400
+    assert client.post("/api/ui/settings", json={"nope": 1}).status_code == 400
 
 
 # ── themes ─────────────────────────────────────────────────────────────────────
@@ -137,42 +122,29 @@ def test_loading_unknown_theme_raises(settings_path: Path) -> None:
 
 
 def test_post_theme_persists() -> None:
-    async def go() -> None:
-        client = server.app.test_client()
-        resp = await client.post("/api/ui/settings", json={"theme": "solarized-light"})
-        assert resp.status_code == 200
-        assert (await resp.get_json())["theme"] == "solarized-light"
-
-    run(go())
+    resp = _client().post("/api/ui/settings", json={"theme": "solarized-light"})
+    assert resp.status_code == 200
+    assert resp.json()["theme"] == "solarized-light"
     assert ui_settings.load_ui_settings().theme == "solarized-light"
 
 
 def test_post_unknown_theme_is_400_and_changes_nothing() -> None:
-    async def go() -> None:
-        client = server.app.test_client()
-        await client.post("/api/ui/settings", json={"theme": "solarized-dark"})
-        resp = await client.post("/api/ui/settings", json={"theme": "chartreuse"})
-        assert resp.status_code == 400
-
-    run(go())
+    client = _client()
+    client.post("/api/ui/settings", json={"theme": "solarized-dark"})
+    assert client.post("/api/ui/settings", json={"theme": "chartreuse"}).status_code == 400
     assert ui_settings.load_ui_settings().theme == "solarized-dark"
 
 
 def test_updating_one_setting_leaves_the_other_alone() -> None:
     """The picker POSTs only `theme`; the skill POSTs only `side_panel`. Neither may clobber."""
 
-    async def go() -> None:
-        client = server.app.test_client()
-        await client.post("/api/ui/settings", json={"side_panel": True})
-        await client.post("/api/ui/settings", json={"theme": "solarized-light"})
-        body = await (await client.get("/api/ui/settings")).get_json()
-        assert body == {"side_panel": True, "theme": "solarized-light"}
+    client = _client()
+    client.post("/api/ui/settings", json={"side_panel": True})
+    client.post("/api/ui/settings", json={"theme": "solarized-light"})
+    assert client.get("/api/ui/settings").json() == {"side_panel": True, "theme": "solarized-light"}
 
-        await client.post("/api/ui/settings", json={"side_panel": False})
-        body = await (await client.get("/api/ui/settings")).get_json()
-        assert body == {"side_panel": False, "theme": "solarized-light"}
-
-    run(go())
+    client.post("/api/ui/settings", json={"side_panel": False})
+    assert client.get("/api/ui/settings").json() == {"side_panel": False, "theme": "solarized-light"}
 
 
 def test_theme_names_match_the_client() -> None:
@@ -180,7 +152,7 @@ def test_theme_names_match_the_client() -> None:
 
     A name the server accepts but the client can't paint would silently render an unstyled UI.
     """
-    here = Path(__file__).parent
+    here = Path(__file__).parent.parent / "src" / "server"
 
     js = (here / "static" / "theme.js").read_text()
     # keys of the THEMES map, e.g.   'solarized-light': {
@@ -194,41 +166,29 @@ def test_theme_names_match_the_client() -> None:
 
 
 def test_index_carries_the_theme_for_a_flash_free_load() -> None:
-    async def go() -> None:
-        client = server.app.test_client()
-        body = await (await client.get("/")).get_data(as_text=True)
-        assert 'data-theme="dark"' in body
+    client = _client()
+    assert 'data-theme="dark"' in client.get("/").text
 
-        await client.post("/api/ui/settings", json={"theme": "solarized-light"})
-        body = await (await client.get("/")).get_data(as_text=True)
-        assert 'data-theme="solarized-light"' in body
-        assert "/static/theme.js" in body
-
-    run(go())
+    client.post("/api/ui/settings", json={"theme": "solarized-light"})
+    body = client.get("/").text
+    assert 'data-theme="solarized-light"' in body
+    assert "/static/theme.js" in body
 
 
 # ── the toggle actually changes the page ───────────────────────────────────────
 
 
 def test_index_omits_panel_script_by_default() -> None:
-    async def go() -> None:
-        client = server.app.test_client()
-        resp = await client.get("/")
-        assert resp.status_code == 200
-        assert "side-panel.js" not in (await resp.get_data(as_text=True))
-
-    run(go())
+    resp = _client().get("/")
+    assert resp.status_code == 200
+    assert "side-panel.js" not in resp.text
 
 
 def test_index_includes_panel_script_when_enabled() -> None:
-    async def go() -> None:
-        client = server.app.test_client()
-        await client.post("/api/ui/settings", json={"side_panel": True})
-        resp = await client.get("/")
-        body = await resp.get_data(as_text=True)
-        assert "side-panel.js" in body
-        # the terminal UI must still be intact
-        assert "app.js" in body
-        assert 'id="panes"' in body
-
-    run(go())
+    client = _client()
+    client.post("/api/ui/settings", json={"side_panel": True})
+    body = client.get("/").text
+    assert "side-panel.js" in body
+    # the terminal UI must still be intact
+    assert "app.js" in body
+    assert 'id="panes"' in body

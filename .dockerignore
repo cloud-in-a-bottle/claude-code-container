@@ -7,3 +7,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .DS_Store
+.idea/
+.vscode/
+test-results/
+playwright-report/

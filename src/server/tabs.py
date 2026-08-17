@@ -12,22 +12,28 @@ import subprocess
 import termios
 import uuid
 from pathlib import Path
+from typing import Any
 
 import attr
-from quart import websocket
+from litestar import WebSocket
 
-from config import HOME, MY_PROJECT_DIR
-from remote_services import get_anthropic_key
-from tab_store import CLAUDE, SHELL, PersistedTab, load_tabs, save_tabs
+from server.config import HOME
+from server.config import MY_PROJECT_DIR
+from server.remote_services import get_anthropic_key
+from server.tab_store import CLAUDE
+from server.tab_store import SHELL
+from server.tab_store import PersistedTab
+from server.tab_store import load_tabs
+from server.tab_store import save_tabs
 
 _BUF_MAX = 100 * 1024  # 100 KB ring buffer per tab
 _KICKED_MSG = b"\x01" + json.dumps({"type": "kicked"}).encode()
 
-_tabs: dict[str, "ServerTab"] = {}
+_tabs: dict[str, ServerTab] = {}
 _tab_counter: int = 0
 _claude_tab_created: bool = False
 _active_cwd: str | None = None  # set via set_active_cwd(); used as cwd for all new tabs
-_last_persisted: list["PersistedTab"] = []
+_last_persisted: list[PersistedTab] = []
 _restoring: bool = False  # see restore_tabs(): suppresses the partial writes a restore would make
 
 
@@ -78,7 +84,7 @@ def _proc_name(pgid: int) -> str:
     return comm
 
 
-def tab_proc_info(tab: "ServerTab") -> tuple[str, str]:
+def tab_proc_info(tab: ServerTab) -> tuple[str, str]:
     """Return (program, cwd) for the foreground process of a tab's PTY.
 
     program is '' when the foreground is bash/unknown.
@@ -284,10 +290,10 @@ def restore_command(kind: str, claude_bin: str, session_id: str = "", *, continu
     """The command that brings a tab of this kind back.
 
     A tab with a session id reattaches to that exact conversation, so two Claude tabs in one
-    directory come back as two distinct conversations. Tabs persisted before session ids existed
-    fall back to `--continue`, which resolves per-directory and so can only be trusted when the tab
-    is landing in the directory it left; `continue_ok=False` says it isn't. Every branch falls
-    through to a fresh session rather than dumping the user at a bare shell.
+    directory come back as two distinct conversations. Without one, `--continue` is the best
+    available: it resolves per-directory, so it can only be trusted when the tab is landing in the
+    directory it left; `continue_ok=False` says it isn't. Every branch falls through to a fresh
+    session rather than dumping the user at a bare shell.
     """
     if kind != CLAUDE:
         return ["bash", "-l"]
@@ -403,14 +409,14 @@ async def new_bash_tab(label: str | None = None) -> ServerTab:
         )
 
 
-async def handle_terminal_ws() -> None:
-    await websocket.accept()
-    tab_id = websocket.args.get("tab")
+async def handle_terminal_ws(socket: WebSocket[Any, Any, Any]) -> None:
+    await socket.accept()
+    tab_id = socket.query_params.get("tab")
     tab = _tabs.get(tab_id) if tab_id else None
     if tab is None:
         return
     if tab.lock.locked():
-        await websocket.send(b"\x01" + json.dumps({"type": "busy"}).encode())
+        await socket.send_data(b"\x01" + json.dumps({"type": "busy"}).encode(), mode="binary")
         return
 
     await tab.lock.acquire()
@@ -425,7 +431,7 @@ async def handle_terminal_ws() -> None:
     # background tabs use last known size). Without this, output_buf would be
     # written into a terminal that hasn't been sized yet, causing garbled display.
     try:
-        first_msg = await asyncio.wait_for(websocket.receive(), timeout=1.0)
+        first_msg = await asyncio.wait_for(socket.receive_data(mode="binary"), timeout=1.0)
         if isinstance(first_msg, bytes | bytearray) and len(first_msg) > 1:
             if first_msg[0] == 0x01:
                 try:
@@ -436,30 +442,30 @@ async def handle_terminal_ws() -> None:
                     pass
             elif first_msg[0] == 0x00:
                 os.write(tab.master_fd, bytes(first_msg[1:]))
-    except (TimeoutError, Exception):
+    except Exception:
         pass
 
     if tab.output_buf:
-        await websocket.send(b"\x00" + bytes(tab.output_buf))
+        await socket.send_data(b"\x00" + bytes(tab.output_buf), mode="binary")
 
     async def pty_to_ws() -> None:
         try:
             while True:
                 chunk = await q.get()
                 if chunk is None:
-                    await websocket.send(b"\x01" + json.dumps({"type": "exit"}).encode())
+                    await socket.send_data(b"\x01" + json.dumps({"type": "exit"}).encode(), mode="binary")
                     break
                 if chunk is _KICKED_MSG:
-                    await websocket.send(_KICKED_MSG)
+                    await socket.send_data(_KICKED_MSG, mode="binary")
                     break
-                await websocket.send(b"\x00" + chunk)
+                await socket.send_data(b"\x00" + chunk, mode="binary")
         except Exception:
             pass
 
     async def ws_to_pty() -> None:
         try:
             while True:
-                msg = await websocket.receive()
+                msg = await socket.receive_data(mode="binary")
                 if isinstance(msg, bytes | bytearray) and len(msg) > 0:
                     kind = msg[0]
                     payload = bytes(msg[1:])

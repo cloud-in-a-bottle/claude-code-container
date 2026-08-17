@@ -2,7 +2,7 @@ import json
 
 import attr
 
-from config import HOME
+from server.config import HOME
 
 # Under $HOME rather than /app: openhost points HOME at the app's persistent data dir, so the tab
 # list survives image rebuilds. Anything written into /app does not.
@@ -21,7 +21,7 @@ class PersistedTab:
     cwd: str
     # The Claude conversation this tab owns. Pinned at launch with --session-id so a restore can
     # reattach to this exact conversation instead of whichever one was last used in the directory.
-    # Empty for shell tabs, and for Claude tabs persisted before this field existed.
+    # Empty for shell tabs, and for any tab file written without one.
     session_id: str = ""
 
 

@@ -242,11 +242,28 @@ strips it from the remote afterward so the token is never persisted on disk.
 Public repos clone without a token, and if no GitHub grant is available the
 clone falls back to an unauthenticated attempt.
 
-## Running locally without openhost
+## Development
 
-```
-pip install quart hypercorn
-python3 server.py
+```bash
+just setup             # deps, pre-commit hooks, playwright chromium
+just run               # run locally on http://localhost:8080
+just test              # fast unit tests
+just test-integration  # build the image and exercise it under podman
+just check             # lint, format, typecheck
+just build             # build the container image
 ```
 
-Then open http://localhost:8080.
+Python work uses [uv](https://docs.astral.sh/uv/). Use `uv add <pkg>` to add a
+dependency and `uv add --group dev <pkg>` for a dev-only one.
+
+The app lives in `src/server/`, with its templates, static assets and the shell
+scripts it launches (`open_workspace.sh`, `github_repo.sh`) alongside the Python
+modules. `entrypoint.sh`, `workbench.sh` and `skills/` sit at the repo root
+because the container refers to them by absolute path.
+
+`just test-integration` uses the OpenHost test harness (the `openhost[test-harness]`
+package), which builds the Dockerfile and runs the app under **podman** fronted by
+the real OpenHost router, so podman must be running. `stack.url` requires owner auth
+(use `stack.owner_session` for requests, or `stack.playwright_login(page)` for browser
+tests); `stack.app_url` hits the container directly. See `tests/conftest.py` for the
+`stack` fixture.
