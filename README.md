@@ -34,6 +34,58 @@ into every new terminal's environment. This is best-effort — if the secrets
 app isn't around the terminal still works, you just have to set the key
 yourself.
 
+## GitHub auth (`gh`, pushing, private repos)
+
+The workbench can mint a GitHub token through openhost's `oauth-v2` app, which
+is what lets it clone private repos and push. On startup `seed_gh_auth()` tries
+to log `gh` in automatically; when that hasn't happened, here is the manual
+flow and the two things that reliably trip people up.
+
+**1. Mint a token.** `account` is required and must match a GitHub login that
+has already been granted — it defaults to `"default"`, which matches nothing, so
+leaving it out returns `permission_required` even when a valid grant exists:
+
+```bash
+# list the accounts that have grants (may repeat a name; dedupe it)
+curl -s -X POST "$OPENHOST_ROUTER_URL/api/services/v2/call/oauth/accounts" \
+  -H "Authorization: Bearer $OPENHOST_APP_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"provider":"github","scopes":["repo"]}'
+
+curl -s -X POST "$OPENHOST_ROUTER_URL/api/services/v2/call/oauth/token" \
+  -H "Authorization: Bearer $OPENHOST_APP_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"provider":"github","scopes":["repo"],"account":"<login>"}'
+```
+
+If that returns `permission_required`, the response carries a `grant_url`. Open
+it in a browser and approve. Give `return_to` a value starting with `/` (a bare
+`/` is fine) — the provider ignores anything that doesn't, so an empty one just
+drops you somewhere unhelpful. You can confirm what is granted with:
+
+```bash
+oh curl -- -s "https://$OPENHOST_ZONE_DOMAIN/api/permissions/v2?app_id=$OPENHOST_APP_ID"
+```
+
+**2. Use the token via `GH_TOKEN`, not `gh auth login`.** The minted token is
+`repo`-scoped, and `gh auth login --with-token` rejects it with *"missing
+required scope 'read:org'"*. Export it instead:
+
+```bash
+export GH_TOKEN=<token>
+gh api user -q .login          # works
+git push "https://x-access-token:$GH_TOKEN@github.com/<owner>/<repo>.git" <branch>
+```
+
+Tokens are short-lived; re-mint when one stops working. The `/github-auth`
+skill walks Claude through all of this.
+
+> **Known gap:** `fetch_github_token()` in `remote_services.py` requests a token
+> without an `account`, so it always gets `permission_required` once grants are
+> tied to a real login — meaning `seed_gh_auth()` silently does nothing and `gh`
+> is left logged out. Both failures are swallowed by design (they're
+> best-effort), so the only symptom is `gh` not being authenticated.
+
 ## The UI
 
 `GET /` serves a tabbed xterm.js page. Each tab opens its own WebSocket
