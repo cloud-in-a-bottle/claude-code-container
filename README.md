@@ -15,6 +15,30 @@ point for building or debugging openhost apps.
   or `OPENHOST_DIR` env vars).
 - A Claude Code skill at `~/.claude/skills/openhost/` that points Claude
   at the curated docs in the local openhost clone.
+- A checkout of this repo at `~/claude-code-container`, so you can work on
+  the workbench from inside the workbench (override with `WORKBENCH_REPO_URL`
+  or `WORKBENCH_DIR`). See the warning below before editing it.
+
+### Editing the workbench from inside itself
+
+> **Local edits in `~/claude-code-container` are not durable.** If you're
+> reading this file there, that includes this one.
+
+The checkout tracks the repo's default branch, so it can be *ahead of* the
+image you're actually running — it's a convenience for hacking on the
+workbench, not a record of what got built.
+
+When the app is updated from outside (a rebuild via the dashboard, `oh app
+reload --update`, or a redeploy), the entrypoint resets that checkout to the
+remote with `git reset --hard` and `git clean -fd`, discarding anything
+uncommitted. An ordinary container restart does *not* do this — the entrypoint
+compares `/app/.image-stamp`, which only changes when the image is rebuilt with
+new content, so restarts leave your work alone.
+
+Push anything you want to keep, and treat the checkout as disposable. The
+resync is deliberately best-effort and never fails startup: if GitHub is
+unreachable or git is unhappy, it logs a warning, leaves the directory as it
+is, and the workbench boots anyway.
 
 Authentication for `claude` is whatever the user sets up inside the
 terminal — either `ANTHROPIC_API_KEY` in the environment or an interactive
@@ -34,11 +58,119 @@ into every new terminal's environment. This is best-effort — if the secrets
 app isn't around the terminal still works, you just have to set the key
 yourself.
 
+## GitHub auth (`gh`, pushing, private repos)
+
+The workbench can mint a GitHub token through openhost's `oauth-v2` app, which
+is what lets it clone private repos and push. On startup `seed_gh_auth()` tries
+to log `gh` in automatically; when that hasn't happened, here is the manual
+flow and the two things that reliably trip people up.
+
+**1. Mint a token.** `account` is required and must match a GitHub login that
+has already been granted — it defaults to `"default"`, which matches nothing, so
+leaving it out returns `permission_required` even when a valid grant exists:
+
+```bash
+# list the accounts that have grants (may repeat a name; dedupe it)
+curl -s -X POST "$OPENHOST_ROUTER_URL/api/services/v2/call/oauth/accounts" \
+  -H "Authorization: Bearer $OPENHOST_APP_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"provider":"github","scopes":["repo"]}'
+
+curl -s -X POST "$OPENHOST_ROUTER_URL/api/services/v2/call/oauth/token" \
+  -H "Authorization: Bearer $OPENHOST_APP_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"provider":"github","scopes":["repo"],"account":"<login>"}'
+```
+
+If that returns `permission_required`, the response carries a `grant_url`. Open
+it in a browser and approve. Give `return_to` a value starting with `/` (a bare
+`/` is fine) — the provider ignores anything that doesn't, so an empty one just
+drops you somewhere unhelpful. You can confirm what is granted with:
+
+```bash
+oh curl -- -s "https://$OPENHOST_ZONE_DOMAIN/api/permissions/v2?app_id=$OPENHOST_APP_ID"
+```
+
+**2. Use the token via `GH_TOKEN`, not `gh auth login`.** The minted token is
+`repo`-scoped, and `gh auth login --with-token` rejects it with *"missing
+required scope 'read:org'"*. Export it instead:
+
+```bash
+export GH_TOKEN=<token>
+gh api user -q .login          # works
+git push "https://x-access-token:$GH_TOKEN@github.com/<owner>/<repo>.git" <branch>
+```
+
+Tokens are short-lived; re-mint when one stops working. The `/github-auth`
+skill walks Claude through all of this.
+
+> **Known gap:** `fetch_github_token()` in `remote_services.py` requests a token
+> without an `account`, so it always gets `permission_required` once grants are
+> tied to a real login — meaning `seed_gh_auth()` silently does nothing and `gh`
+> is left logged out. Both failures are swallowed by design (they're
+> best-effort), so the only symptom is `gh` not being authenticated.
+
 ## The UI
 
 `GET /` serves a tabbed xterm.js page. Each tab opens its own WebSocket
 to `/terminal/ws`, which bridges to a PTY running `bash -l` inside the
 container.
+
+### Colour schemes
+
+A picker in the top-right of the tab bar switches between **Dark** (the
+default), **Solarized Light** and **Solarized Dark**. It applies immediately —
+open terminals are recoloured in place, no reload — and is saved server-side in
+`$HOME/.workbench/ui.json`, so it persists across restarts and rebuilds and
+follows you to any browser.
+
+```
+POST /api/ui/settings   { "theme": "solarized-light" }
+```
+
+A scheme is defined in two halves, because the terminal and the chrome are
+painted by different machinery:
+
+- `static/themes.css` — CSS variables selected by `data-theme` on `<html>`,
+  covering the tab bar, menus, and side panel. The bare `:root` block is the
+  dark default, so an unknown or absent theme falls back to the original look.
+- `static/theme.js` — the terminal's 16-colour ANSI palette, which xterm.js
+  needs as a JS object since it renders to a canvas.
+
+The server renders `data-theme` into the page, so there's no flash of the wrong
+colours before the picker initialises. Adding a scheme means touching
+`THEMES` in `ui_settings.py`, `themes.css`, and `theme.js` — a test asserts
+those three lists agree, so a half-added theme fails rather than rendering
+unstyled.
+
+### Side-by-side panel (opt-in)
+
+A resizable pane beside the terminal that loads any URL in an iframe —
+handy for watching a dev server or another openhost app while you work.
+It's off by default. The easiest way to turn it on is the bundled skill:
+run `/side-by-side` in Claude Code and ask for it on or off. Under the
+hood that's just:
+
+```
+POST /api/ui/settings   { "side_panel": true }
+GET  /api/ui/settings   -> { "side_panel": false }
+```
+
+The setting is stored in `$HOME/.workbench/ui.json`. Since openhost points
+`HOME` at the app's persistent data dir, the choice survives container
+rebuilds. It takes effect on the next page load; reloading is safe because
+terminals live server-side and the page re-attaches to the running session.
+
+Drag the divider to resize, or double-click it to reset; it's focusable, with
+arrow keys (Shift for larger steps). The pane's toolbar has a URL bar plus
+reload, open-in-a-real-tab, and hide buttons, and **◻ panel** in the tab bar
+brings a hidden pane back. Width, visibility and last URL are remembered per
+browser in `localStorage`; the on/off setting above is server-side.
+
+When enabled, `index.html` pulls in `static/side-panel.js`, which injects
+its own CSS and builds its own DOM. Nothing is fetched when it's off. It
+resizes the terminal by dispatching a `resize` event rather than calling
+into `app.js`, since `app.js` already refits xterm on that event.
 
 ## Prefilling a Claude session (preview)
 

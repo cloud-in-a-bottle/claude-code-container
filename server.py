@@ -1,11 +1,12 @@
 import asyncio
 import shutil
 
-from quart import Quart, Response, jsonify, redirect, request, send_from_directory
+from quart import Quart, Response, jsonify, redirect, render_template, request
 from quart.typing import ResponseReturnValue
 
 from config import APP_DIR, HOME, OPENHOST_DIR, PORT
 from remote_services import get_anthropic_key, seed_gh_auth, seed_oh_config
+from tab_store import CLAUDE, SHELL
 from tabs import (
     _tabs,
     create_server_tab,
@@ -13,9 +14,12 @@ from tabs import (
     kick_tab,
     kill_tab,
     new_bash_tab,
+    persist_tabs_periodically,
+    restore_tabs,
     set_active_cwd,
     tab_proc_info,
 )
+from ui_settings import THEMES, UiSettings, load_ui_settings, save_ui_settings
 from workspace import REF_RE, WORKSPACE_SCRIPT, repo_dir_name, resolve_access, validate_repo_url
 
 GITHUB_REPO_SCRIPT = APP_DIR / "github_repo.sh"
@@ -35,11 +39,44 @@ async def health() -> ResponseReturnValue:
     return {"status": "ok"}, 200
 
 
+def _settings_json(settings: UiSettings) -> dict[str, object]:
+    return {"side_panel": settings.side_panel, "theme": settings.theme}
+
+
 @app.get("/")
 async def index() -> ResponseReturnValue:
-    resp = await send_from_directory(str(APP_DIR / "templates"), "index.html")
-    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    return resp
+    settings = load_ui_settings()
+    html = await render_template("index.html", side_panel_enabled=settings.side_panel, theme=settings.theme)
+    return html, 200, {"Cache-Control": "no-cache, no-store, must-revalidate"}
+
+
+@app.get("/api/ui/settings")
+async def get_ui_settings() -> ResponseReturnValue:
+    return jsonify(_settings_json(load_ui_settings()))
+
+
+@app.post("/api/ui/settings")
+async def update_ui_settings() -> ResponseReturnValue:
+    """Update UI settings. Keys left out keep their current value.
+
+    `side_panel` takes effect on the next page load; `theme` is applied live by the client.
+    """
+    data = await request.get_json(silent=True) or {}
+    known = {"side_panel", "theme"}
+    if not known & data.keys():
+        return jsonify({"error": f"expected at least one of: {', '.join(sorted(known))}"}), 400
+
+    current = load_ui_settings()
+    theme = str(data.get("theme", current.theme))
+    if theme not in THEMES:
+        return jsonify({"error": f"unknown theme {theme!r}; expected one of: {', '.join(THEMES)}"}), 400
+
+    settings = UiSettings(
+        side_panel=bool(data.get("side_panel", current.side_panel)),
+        theme=theme,
+    )
+    save_ui_settings(settings)
+    return jsonify(_settings_json(settings))
 
 
 @app.get("/api/tabs")
@@ -93,6 +130,9 @@ async def open_github_repo() -> ResponseReturnValue:
         cwd=str(HOME),
         env=env,
         label=repo_name,
+        # The script clones and then hands over to Claude; a restore must re-enter that
+        # conversation in the checkout, never re-run the clone.
+        kind=CLAUDE,
     )
     return redirect(f"/?tab={tab.id}", code=303)
 
@@ -145,6 +185,7 @@ async def create_session() -> ResponseReturnValue:
         cwd=str(OPENHOST_DIR if OPENHOST_DIR.exists() else HOME),
         env=env,
         label="claude",
+        kind=CLAUDE,
     )
     return jsonify({"id": tab.id, "url": f"/?tab={tab.id}"})
 
@@ -216,6 +257,8 @@ async def open_workspace() -> ResponseReturnValue:
         cwd=str(HOME),
         env=env,
         label=repo_dir_name(repo),
+        # The script clones and then execs a plain shell, so that is what a restore recreates.
+        kind=SHELL,
     )
     return redirect(f"/?tab={tab.id}", code=303)
 
@@ -237,6 +280,10 @@ async def _serve() -> None:
 
     await seed_oh_config()
     await seed_gh_auth()
+    # Bring back the tabs from the previous run before any client connects, so the first page
+    # load already shows them instead of racing to create a fresh one.
+    await restore_tabs()
+    asyncio.create_task(persist_tabs_periodically())
 
     cfg = hypercorn.config.Config()
     cfg.bind = [f"0.0.0.0:{PORT}"]

@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import server
+import tab_store
 import tabs
 import workspace
 
@@ -190,10 +191,12 @@ def _stub_create_tab(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
         env: dict[str, str] | None = None,
         stdin_seed: str = "",
         label: str | None = None,
+        kind: str = tab_store.SHELL,
+        tab_id: str | None = None,
     ) -> tabs.ServerTab:
-        tab = tabs.ServerTab(id="test-id", label=label or "test", master_fd=-1, proc=MagicMock())
+        tab = tabs.ServerTab(id=tab_id or "test-id", label=label or "test", master_fd=-1, proc=MagicMock())
         tabs._tabs[tab.id] = tab
-        created.append({"command": command, "cwd": cwd, "env": env or {}, "label": label})
+        created.append({"command": command, "cwd": cwd, "env": env or {}, "label": label, "kind": kind})
         return tab
 
     monkeypatch.setattr(server, "create_server_tab", fake)
@@ -277,6 +280,14 @@ def test_success_redirects_303_with_location(monkeypatch: pytest.MonkeyPatch) ->
     assert env["WORKSPACE_REF"] == "main"
     assert env["WORKSPACE_DIR"] == "r"
     assert "WORKSPACE_GITHUB_TOKEN" not in env
+
+
+def test_workspace_tab_restores_as_a_shell_not_a_re_clone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The script clones and then execs a shell. Restoring must not run the clone again."""
+    _stub_access(monkeypatch, "ok")
+    created = _stub_create_tab(monkeypatch)
+    _post(form={"repo": "https://github.com/o/r.git", "ref": "main"})
+    assert created[0]["kind"] == tab_store.SHELL
 
 
 def test_success_passes_token_to_tab(monkeypatch: pytest.MonkeyPatch) -> None:

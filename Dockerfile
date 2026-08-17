@@ -70,6 +70,8 @@ COPY github_repo.sh /app/github_repo.sh
 COPY templates /app/templates
 COPY static /app/static
 COPY skills /app/skills
+# The bundled skills point at this rather than restating it, so it has to be in the image.
+COPY README.md /app/README.md
 COPY entrypoint.sh /app/entrypoint.sh
 # Site rcfile: lives under /etc so $HOME (which we point at the persistent data
 # dir at runtime) stays untouched and user edits to ~/.bashrc/~/.bash_profile
@@ -78,6 +80,12 @@ COPY workbench.sh /etc/profile.d/workbench.sh
 RUN echo '[ -r /etc/profile.d/workbench.sh ] && . /etc/profile.d/workbench.sh' \
         >> /etc/bash.bashrc \
     && chmod +x /app/entrypoint.sh /app/github_repo.sh
+
+# Marks this build. Must stay after every COPY above: a change to any copied file invalidates the
+# cache from that point on, so this regenerates exactly when the image content actually changed,
+# and stays put when a rebuild is a pure cache hit. entrypoint.sh compares it against the copy it
+# left in ~/claude-code-container to tell an app update apart from a container restart.
+RUN date -u +%Y-%m-%dT%H:%M:%SZ > /app/.image-stamp
 
 WORKDIR /root
 

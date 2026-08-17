@@ -4,17 +4,20 @@ import json
 import os
 import pty
 import secrets
+import shlex
 import shutil
 import signal
 import struct
 import subprocess
 import termios
+from pathlib import Path
 
 import attr
 from quart import websocket
 
 from config import HOME, MY_PROJECT_DIR
 from remote_services import get_anthropic_key
+from tab_store import CLAUDE, SHELL, PersistedTab, load_tabs, save_tabs
 
 _BUF_MAX = 100 * 1024  # 100 KB ring buffer per tab
 _KICKED_MSG = b"\x01" + json.dumps({"type": "kicked"}).encode()
@@ -23,6 +26,7 @@ _tabs: dict[str, "ServerTab"] = {}
 _tab_counter: int = 0
 _claude_tab_created: bool = False
 _active_cwd: str | None = None  # set via set_active_cwd(); used as cwd for all new tabs
+_last_persisted: list["PersistedTab"] = []
 
 
 def set_active_cwd(path: str) -> None:
@@ -92,6 +96,10 @@ class ServerTab:
     label: str
     master_fd: int
     proc: subprocess.Popen[bytes]
+    # What to bring back if this tab is restored: a Claude session or a plain shell, and where.
+    # start_cwd is the fallback for when the live cwd can't be read (the process has exited).
+    kind: str = SHELL
+    start_cwd: str = str(HOME)
     lock: asyncio.Lock = attr.Factory(asyncio.Lock)
     connected: bool = False
     alive: bool = True
@@ -112,6 +120,7 @@ async def tab_reader(tab: ServerTab) -> None:
             data = await loop.run_in_executor(None, os.read, tab.master_fd, 4096)
         except OSError:
             tab.alive = False
+            persist_tabs()
             if tab.client_queue is not None:
                 try:
                     tab.client_queue.put_nowait(None)
@@ -120,6 +129,7 @@ async def tab_reader(tab: ServerTab) -> None:
             return
         if not data:
             tab.alive = False
+            persist_tabs()
             if tab.client_queue is not None:
                 try:
                     tab.client_queue.put_nowait(None)
@@ -143,10 +153,18 @@ async def create_server_tab(
     env: dict[str, str] | None = None,
     stdin_seed: str = "",
     label: str | None = None,
+    kind: str = SHELL,
+    tab_id: str | None = None,
 ) -> ServerTab:
+    """Start a tab. `kind` is what a restore should recreate, not necessarily what `command` runs.
+
+    A bootstrap script that clones a repo and then launches Claude is kind=CLAUDE: restoring it
+    re-enters the conversation rather than cloning again. `tab_id` is only passed when restoring,
+    so a client holding a ?tab= link still resolves after a restart.
+    """
     global _tab_counter
     _tab_counter += 1
-    tab_id = secrets.token_urlsafe(8)
+    tab_id = tab_id or secrets.token_urlsafe(8)
     tab_label = label or f"term {_tab_counter}"
 
     master_fd, slave_fd = pty.openpty()
@@ -164,10 +182,18 @@ async def create_server_tab(
     )
     os.close(slave_fd)
 
-    tab = ServerTab(id=tab_id, label=tab_label, master_fd=master_fd, proc=proc)
+    tab = ServerTab(
+        id=tab_id,
+        label=tab_label,
+        master_fd=master_fd,
+        proc=proc,
+        kind=kind,
+        start_cwd=cwd or str(HOME),
+    )
     _tabs[tab_id] = tab
 
     asyncio.create_task(tab_reader(tab))
+    persist_tabs()
 
     if stdin_seed:
 
@@ -181,6 +207,100 @@ async def create_server_tab(
         asyncio.create_task(_seed())
 
     return tab
+
+
+def _tab_cwd(tab: ServerTab) -> str:
+    """Where this tab currently is, falling back to where it started once the process is gone."""
+    _, cwd = tab_proc_info(tab)
+    if not cwd:
+        return tab.start_cwd
+    if cwd == "~":
+        return str(HOME)
+    if cwd.startswith("~/"):
+        return str(HOME / cwd[2:])
+    return cwd
+
+
+def tab_snapshot() -> list[PersistedTab]:
+    """The live tabs, in the form a restore needs. Dead tabs are dropped rather than resurrected."""
+    return [
+        PersistedTab(id=t.id, label=t.label, kind=t.kind, cwd=_tab_cwd(t)) for t in _tabs.values() if t.alive
+    ]
+
+
+def persist_tabs() -> None:
+    """Write the tab list, skipping the write when nothing has changed since last time."""
+    global _last_persisted
+    snapshot = tab_snapshot()
+    if snapshot == _last_persisted:
+        return
+    try:
+        save_tabs(snapshot)
+    except OSError as e:
+        # Losing the tab list is a lot better than taking the workbench down over it.
+        print(f"[tabs] could not save the tab list: {e}", flush=True)
+        return
+    _last_persisted = snapshot
+
+
+async def persist_tabs_periodically(interval_seconds: float = 30.0) -> None:
+    """Keep the saved cwds current — they drift as the user moves around, with no event to hook."""
+    while True:
+        await asyncio.sleep(interval_seconds)
+        persist_tabs()
+
+
+def restore_command(kind: str, claude_bin: str) -> list[str]:
+    """The command that brings a tab of this kind back.
+
+    Claude tabs re-enter the last conversation for that directory; `--continue` exits non-zero when
+    there isn't one (a brand new checkout, or a cleared history), so fall through to a fresh
+    session rather than dumping the user at a bare shell.
+    """
+    if kind != CLAUDE:
+        return ["bash", "-l"]
+    claude = shlex.quote(claude_bin)
+    return [
+        "bash",
+        "-l",
+        "-c",
+        f"{claude} --continue --dangerously-skip-permissions "
+        f"|| {claude} --dangerously-skip-permissions; exec bash",
+    ]
+
+
+async def restore_tabs() -> list[ServerTab]:
+    """Recreate the tabs from the last run. Processes don't survive a restart; their tabs do.
+
+    Called once at startup, before any client connects.
+    """
+    global _claude_tab_created
+    persisted = load_tabs()
+    if not persisted:
+        return []
+
+    key = await get_anthropic_key()
+    env: dict[str, str] = {"ANTHROPIC_API_KEY": key} if key else {}
+    claude_bin = shutil.which("claude") or "claude"
+
+    restored: list[ServerTab] = []
+    for entry in persisted:
+        # The directory can be gone — a repo removed, or a temp dir cleaned up between runs.
+        cwd = entry.cwd if Path(entry.cwd).is_dir() else str(HOME)
+        restored.append(
+            await create_server_tab(
+                command=restore_command(entry.kind, claude_bin),
+                cwd=cwd,
+                env=env,
+                label=entry.label,
+                kind=entry.kind,
+                tab_id=entry.id,
+            )
+        )
+    # Whatever the restored mix is, the "first tab runs Claude" rule has already had its say.
+    _claude_tab_created = True
+    print(f"[tabs] restored {len(restored)} tab(s) from the previous run", flush=True)
+    return restored
 
 
 def kill_tab(tab: ServerTab) -> None:
@@ -205,6 +325,7 @@ def kill_tab(tab: ServerTab) -> None:
             tab.client_queue.put_nowait(None)
         except asyncio.QueueFull:
             pass
+    persist_tabs()
 
 
 async def new_bash_tab(label: str | None = None) -> ServerTab:
@@ -228,12 +349,14 @@ async def new_bash_tab(label: str | None = None) -> ServerTab:
             cwd=cwd,
             env=env,
             label=label,
+            kind=CLAUDE,
         )
     else:
         return await create_server_tab(
             command=["bash", "-l"],
             cwd=_active_cwd or str(HOME),
             label=label,
+            kind=SHELL,
         )
 
 
