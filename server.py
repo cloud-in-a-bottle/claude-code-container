@@ -6,6 +6,7 @@ from quart.typing import ResponseReturnValue
 
 from config import APP_DIR, HOME, OPENHOST_DIR, PORT
 from remote_services import get_anthropic_key, seed_gh_auth, seed_oh_config
+from tab_store import CLAUDE, SHELL
 from tabs import (
     _tabs,
     create_server_tab,
@@ -13,6 +14,8 @@ from tabs import (
     kick_tab,
     kill_tab,
     new_bash_tab,
+    persist_tabs_periodically,
+    restore_tabs,
     set_active_cwd,
     tab_proc_info,
 )
@@ -127,6 +130,9 @@ async def open_github_repo() -> ResponseReturnValue:
         cwd=str(HOME),
         env=env,
         label=repo_name,
+        # The script clones and then hands over to Claude; a restore must re-enter that
+        # conversation in the checkout, never re-run the clone.
+        kind=CLAUDE,
     )
     return redirect(f"/?tab={tab.id}", code=303)
 
@@ -179,6 +185,7 @@ async def create_session() -> ResponseReturnValue:
         cwd=str(OPENHOST_DIR if OPENHOST_DIR.exists() else HOME),
         env=env,
         label="claude",
+        kind=CLAUDE,
     )
     return jsonify({"id": tab.id, "url": f"/?tab={tab.id}"})
 
@@ -250,6 +257,8 @@ async def open_workspace() -> ResponseReturnValue:
         cwd=str(HOME),
         env=env,
         label=repo_dir_name(repo),
+        # The script clones and then execs a plain shell, so that is what a restore recreates.
+        kind=SHELL,
     )
     return redirect(f"/?tab={tab.id}", code=303)
 
@@ -271,6 +280,10 @@ async def _serve() -> None:
 
     await seed_oh_config()
     await seed_gh_auth()
+    # Bring back the tabs from the previous run before any client connects, so the first page
+    # load already shows them instead of racing to create a fresh one.
+    await restore_tabs()
+    asyncio.create_task(persist_tabs_periodically())
 
     cfg = hypercorn.config.Config()
     cfg.bind = [f"0.0.0.0:{PORT}"]
