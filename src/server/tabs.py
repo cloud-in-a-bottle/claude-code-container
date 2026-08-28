@@ -358,10 +358,29 @@ async def restore_tabs() -> list[ServerTab]:
     return restored
 
 
+def tab_pgid(tab: ServerTab) -> int:
+    """The process group to signal to end this tab, checked before anything is sent to it.
+
+    create_server_tab() runs the child under os.setsid(), so it leads its own group and its pid is
+    also its pgid. The validation is not paranoia: a signal aimed at a pid of 0 or 1 hits the whole
+    server (pid 1 in the container is tini, which forwards it), so a bad pid here takes the
+    workbench down instead of one terminal. Better to raise and lose one tab.
+    """
+    pid = tab.proc.pid
+    if not isinstance(pid, int) or pid <= 1:
+        raise ValueError(f"refusing to signal pid {pid!r} for tab {tab.id}: not a tab process")
+    return pid
+
+
 def kill_tab(tab: ServerTab) -> None:
-    """Kill the PTY process and close the master fd."""
+    """Kill the PTY's process group and close the master fd.
+
+    The group, not just the child: the shell's children (Claude, a dev server) would otherwise
+    outlive the tab that owned them.
+    """
+    pgid = tab_pgid(tab)
     try:
-        os.kill(tab.proc.pid, signal.SIGHUP)
+        os.killpg(pgid, signal.SIGHUP)
     except OSError:
         pass
     try:
@@ -372,7 +391,7 @@ def kill_tab(tab: ServerTab) -> None:
         tab.proc.wait(timeout=2)
     except subprocess.TimeoutExpired:
         try:
-            os.kill(tab.proc.pid, signal.SIGKILL)
+            os.killpg(pgid, signal.SIGKILL)
         except OSError:
             pass
     if tab.client_queue is not None:

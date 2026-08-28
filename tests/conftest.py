@@ -5,6 +5,8 @@ from typing import Any
 
 import pytest
 
+from server import tab_store
+from server import tabs
 from server.projects import store
 from server.projects import workspaces
 
@@ -41,4 +43,8 @@ def workbench_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(store, "PROJECTS_PATH", tmp_path / ".workbench" / "projects.json")
     monkeypatch.setattr(workspaces, "WORKSPACES_ROOT", tmp_path / "workspaces")
     monkeypatch.setattr(workspaces, "MIRRORS_DIR", tmp_path / ".workbench" / "mirrors")
+    # The tab list too: the workbench is run from inside itself, so a test suite that wrote to the
+    # real one would delete the tabs of the workbench it is running in.
+    monkeypatch.setattr(tab_store, "TABS_PATH", tmp_path / ".workbench" / "tabs.json")
+    monkeypatch.setattr(tabs, "_last_persisted", [])
     return tmp_path

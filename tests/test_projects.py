@@ -271,15 +271,21 @@ def test_create_workspace_rejects_an_unsafe_ref(workbench_home: Path, monkeypatc
     assert resp.status_code == 400
 
 
-def test_delete_workspace_kills_its_tabs(workbench_home: Path) -> None:
+def test_delete_workspace_kills_its_tabs(workbench_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     workspace = Workspace(project_id="r", name="ws")
     workspaces.create_workspace_dir(workspace)
     tab = ServerTab(id="t1", label="claude", master_fd=-1, proc=MagicMock(), workspace_id="r/ws")
     other = ServerTab(id="t2", label="claude", master_fd=-1, proc=MagicMock(), workspace_id="r/keep")
     _tabs.update({"t1": tab, "t2": other})
 
+    # Spied rather than executed: these tabs have no real process behind them, and the route's job
+    # is to ask for the right ones to be killed.
+    killed: list[str] = []
+    monkeypatch.setattr(project_routes, "kill_tab", lambda t: killed.append(t.id))
+
     assert _client().delete("/api/workspaces/r/ws").status_code == 200
     assert not workspace.path.exists()
+    assert killed == ["t1"]
     assert list(_tabs) == ["t2"]
 
 
