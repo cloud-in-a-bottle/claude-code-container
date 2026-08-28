@@ -16,10 +16,6 @@ const SOLARIZED_ANSI = {
 };
 
 export const THEMES = {
-  'dark': {
-    label: 'Dark',
-    xterm: { background: '#1e1e1e', foreground: '#dddddd', cursor: '#dddddd' },
-  },
   'solarized-light': {
     label: 'Solarized Light',
     xterm: {
@@ -38,8 +34,12 @@ export const THEMES = {
       selectionBackground: '#073642', selectionForeground: '#93a1a1',
     },
   },
+  'dark': {
+    label: 'Dark',
+    xterm: { background: '#1e1e1e', foreground: '#dddddd', cursor: '#dddddd' },
+  },
 };
 
-export const DEFAULT_THEME = 'dark';
+export const DEFAULT_THEME = 'solarized-light';
 
 export const xtermTheme = (name) => (THEMES[name] || THEMES[DEFAULT_THEME]).xterm;

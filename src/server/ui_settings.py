@@ -8,9 +8,10 @@ from server.config import HOME
 # user's choices survive image rebuilds. Anything written into /app does not.
 UI_SETTINGS_PATH = HOME / ".workbench" / "ui.json"
 
-DEFAULT_THEME = "dark"
-# Keep in sync with the THEMES map in static/theme.js and the blocks in static/themes.css.
-THEMES = (DEFAULT_THEME, "solarized-light", "solarized-dark")
+DEFAULT_THEME = "solarized-light"
+# Keep in sync with the THEMES map in ui/src/themes.js and the blocks in static/themes.css, where
+# the default is the bare :root block rather than an attribute selector.
+THEMES = ("dark", "solarized-light", "solarized-dark")
 
 
 @attr.s(auto_attribs=True, frozen=True)

@@ -203,7 +203,10 @@ async def create_server_tab(
     master_fd, slave_fd = pty.openpty()
     set_winsize(master_fd, 24, 80)
 
-    merged_env = {**os.environ, "TERM": "xterm-256color", **(env or {})}
+    # xterm.js renders 24-bit SGR, but nothing in the pty advertises that, so TERM alone leaves
+    # apps at the 256-colour tier: Claude Code quantises its theme onto the xterm cube and its
+    # own /doctor asks for COLORTERM. Terminals we mirror (iTerm2, kitty, VS Code) all set it.
+    merged_env = {**os.environ, "TERM": "xterm-256color", "COLORTERM": "truecolor", **(env or {})}
     proc = subprocess.Popen(  # noqa: S603
         command,
         stdin=slave_fd,
