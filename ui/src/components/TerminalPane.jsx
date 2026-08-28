@@ -15,6 +15,22 @@ function wsUrl(tabId) {
   return `${proto}://${location.host}/terminal/ws?tab=${encodeURIComponent(tabId)}`;
 }
 
+/** The image in a paste, if it carries one. A screenshot off the system clipboard arrives as an
+ *  item; an image file copied out of a file manager arrives in `files` instead. */
+function clipboardImage(clipboardData) {
+  if (!clipboardData) return null;
+  for (const file of clipboardData.files || []) {
+    if (file.type.startsWith('image/')) return file;
+  }
+  for (const item of clipboardData.items || []) {
+    if (item.kind === 'file' && item.type.startsWith('image/')) {
+      const file = item.getAsFile();
+      if (file) return file;
+    }
+  }
+  return null;
+}
+
 /** One terminal: an xterm instance bound to a server-side PTY over a websocket.
  *
  *  Deliberately imperative — xterm owns its own DOM and the websocket has a lifecycle of its own.
@@ -30,6 +46,8 @@ export function TerminalPane(props) {
   let disposed = false;
   let lastDimensions = { cols: 80, rows: 24 };
   const [busy, setBusy] = createSignal('');
+  const [notice, setNotice] = createSignal('');
+  let noticeTimer = null;
 
   function sendResize() {
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
@@ -126,6 +144,40 @@ export function TerminalPane(props) {
     return true;
   }
 
+  function flashNotice(text, clearAfterMs) {
+    clearTimeout(noticeTimer);
+    setNotice(text);
+    if (clearAfterMs) noticeTimer = setTimeout(() => setNotice(''), clearAfterMs);
+  }
+
+  /** Get a pasted image to the program in the terminal, which cannot reach the clipboard itself.
+   *
+   *  The clipboard the image is on belongs to the machine running the browser; the terminal is a
+   *  PTY in a container that has no clipboard at all, which is why Claude Code's own paste says
+   *  there's no image in it. So the bytes go up to the workbench, which writes them to a file, and
+   *  the file's path is pasted in as text -- Claude Code turns a pasted image path back into an
+   *  attachment. */
+  async function pasteImage(blob) {
+    flashNotice('Uploading image\u2026');
+    try {
+      const { path } = await api.uploadPastedImage(blob);
+      if (disposed) return; // the panel was closed while the upload was in flight
+      flashNotice('');
+      term.paste(path);
+      term.focus();
+    } catch (err) {
+      flashNotice(err.message, 6000);
+    }
+  }
+
+  function onPaste(e) {
+    const image = clipboardImage(e.clipboardData);
+    if (!image) return; // an ordinary text paste; xterm's own handler has it
+    e.preventDefault();
+    e.stopPropagation();
+    pasteImage(image);
+  }
+
   onMount(() => {
     term = new Terminal({ cursorBlink: true, fontSize: 14, theme: xtermTheme(theme()) });
     fit = new FitAddon();
@@ -145,6 +197,9 @@ export function TerminalPane(props) {
     });
     connect();
 
+    host.addEventListener('paste', onPaste, true);
+    onCleanup(() => host.removeEventListener('paste', onPaste, true));
+
     const sizeSub = props.panelApi.onDidDimensionsChange(() => refit());
     // Dockview detaches a hidden panel's DOM, so a panel coming back has to measure itself again.
     const visSub = props.panelApi.onDidVisibilityChange((e) => e.isVisible && queueMicrotask(refit));
@@ -163,6 +218,7 @@ export function TerminalPane(props) {
   onCleanup(() => {
     disposed = true;
     reconnecting = false;
+    clearTimeout(noticeTimer);
     if (socket) {
       socket.onclose = null;
       try {
@@ -178,6 +234,9 @@ export function TerminalPane(props) {
   return (
     <div class="terminal-panel">
       <div class="term" ref={host} />
+      <Show when={notice()}>
+        <div class="term-notice">{notice()}</div>
+      </Show>
       <Show when={busy()}>
         <div class="busy-overlay">
           <div>{busy()}</div>

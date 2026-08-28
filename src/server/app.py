@@ -23,6 +23,7 @@ from server.routes.editor import editor_proxy
 from server.routes.editor import list_editors
 from server.routes.editor import start_editor
 from server.routes.editor import stop_editor
+from server.routes.images import create_pasted_image
 from server.routes.open_workspace import open_workspace
 from server.routes.pages import health
 from server.routes.pages import index
@@ -85,6 +86,7 @@ app = Litestar(
         kick_tab_client,
         delete_tab,
         open_workspace,
+        create_pasted_image,
         list_editors,
         start_editor,
         stop_editor,

@@ -133,6 +133,25 @@ Closing a panel kills the terminal behind it. If you close the browser instead (
 
 The frontend source is in `ui/`; see [Development](#development) for the build.
 
+### Pasting images
+
+Copy a screenshot, paste it into a terminal with the usual shortcut, and Claude gets the image.
+
+Claude Code can't do this by itself here. Its own image paste shells out to `xclip`/`wl-paste`, which read the clipboard of the machine the terminal is *on* — a container with no X server and, more to the point, not the machine holding your clipboard. That's what "no image in clipboard" means when you hit it in the browser.
+
+So the page does the transfer instead. The terminal pane watches for a `paste` carrying an image, uploads the bytes to `POST /api/pasted-images`, and pastes the path it gets back into the terminal as ordinary bracketed-paste text. Claude Code recognises a pasted path ending in `.png`/`.jpg`/`.gif`/`.webp` and reads it back into an attachment, so what you see is `[Image #1]` in the prompt.
+
+```
+POST /api/pasted-images   <raw image bytes>
+  -> { "path": "/…/.workbench/pasted-images/paste-20260828-205411-38dd89.png", "media_type": "image/png" }
+```
+
+The format comes off the file's magic bytes, not the content type the browser declared, because it's the extension Claude Code goes by. Anything that isn't one of the four formats is a 415, and the upload is capped at 25MB.
+
+Images land in `$HOME/.workbench/pasted-images/`, never in the workspace — pasting a screenshot shouldn't leave an untracked file in your repo — and anything older than a week is swept up on the next paste.
+
+A text paste is untouched: xterm's own handler still gets it.
+
 ### Colour schemes
 
 A picker in the top-right of the tab bar switches between **Dark** (the default), **Solarized Light** and **Solarized Dark**. It applies immediately — open terminals are recoloured in place, no reload — and is saved server-side in `$HOME/.workbench/ui.json`, so it persists across restarts and rebuilds and follows you to any browser.
