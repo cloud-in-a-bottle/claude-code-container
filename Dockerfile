@@ -34,21 +34,40 @@ RUN curl -fsSL https://claude.ai/install.sh | bash
 ARG OH_VERSION=v0.1.0
 RUN uv tool install "oh @ git+https://github.com/imbue-openhost/openhost.git@${OH_VERSION}#subdirectory=compute_space_cli"
 
-# There's no system python: uv fetches the one pinned by requires-python. The venv is on
-# PATH, so `python3` is the server's. --no-install-project keeps this layer off the source
-# tree, so app edits don't reinstall deps; the project itself is installed below.
+# Everything from here down is ordered by how often it changes, so editing the app only rebuilds
+# the last few layers. There's no system python: uv fetches the one pinned by requires-python. The
+# venv is on PATH, so `python3` is the server's. --no-install-project keeps this layer off the
+# source tree, so app edits don't reinstall dependencies.
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 # Site rcfile lives under /etc so $HOME — repointed at the persistent data dir at
 # runtime — stays untouched and user edits to ~/.bashrc survive image updates.
-COPY . /app
-COPY --from=ui /src/server/static/ui /app/src/server/static/ui
-RUN uv sync --frozen --no-dev \
-    && chmod +x /app/*.sh /app/src/server/projects/*.sh \
-    && cp /app/workbench.sh /etc/profile.d/workbench.sh \
+COPY workbench.sh ./
+RUN cp /app/workbench.sh /etc/profile.d/workbench.sh \
     && echo '[ -r /etc/profile.d/workbench.sh ] && . /etc/profile.d/workbench.sh' >> /etc/bash.bashrc
+
+# The parts of the repo that rarely move: the entrypoint, the manifest, the docs the workbench
+# points Claude at, and the bundled skills.
+COPY entrypoint.sh openhost.toml justfile README.md claude.md style_guide.md ./
+COPY .dockerignore .gitignore .pre-commit-config.yaml Dockerfile ./
+COPY services/ ./services/
+COPY skills/ ./skills/
+RUN chmod +x /app/entrypoint.sh
+
+# The app. `uv sync` installs the project editable, so it points at /app/src rather than copying
+# it, and the server serves its templates and static files from there.
+COPY src/ ./src/
+RUN uv sync --frozen --no-dev \
+    && chmod +x /app/src/server/projects/*.sh
+
+# Built by the `ui` stage above, into the static dir the server already serves.
+COPY --from=ui /src/server/static/ui ./src/server/static/ui
+
+# Not used at runtime; carried so the image is a complete copy of what built it.
+COPY ui/ ./ui/
+COPY tests/ ./tests/
 
 # Must stay after every COPY: it then regenerates exactly when image content changed and
 # stays put on a pure cache hit. entrypoint.sh diffs it against the copy in

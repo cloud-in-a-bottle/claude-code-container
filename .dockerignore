@@ -1,8 +1,12 @@
 .git
 # Load-bearing: a host .venv here would overlay the image's /app/.venv.
 .venv
-__pycache__/
-*.pyc
+# Patterns without `**` only match at the top level, so the nested ones matter: ui/node_modules is
+# built on the host (macOS binaries) and would otherwise be copied over the Linux tree that the
+# frontend build stage installs.
+**/node_modules
+**/__pycache__
+**/*.pyc
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
@@ -11,5 +15,3 @@ __pycache__/
 .vscode/
 test-results/
 playwright-report/
-
-node_modules/
