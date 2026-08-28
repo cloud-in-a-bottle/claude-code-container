@@ -25,8 +25,16 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 # no-new-privileges), so runtime `apt-get install` works without sudo — which
 # no_new_privs blocks anyway. IS_SANDBOX tells Claude Code that, so it allows
 # --dangerously-skip-permissions as uid 0.
+#
+# CLAUDE_CODE_SANDBOXED is the second half: it marks every directory as trusted, so the "Is this a
+# project you trust?" dialog never appears. Trust is recorded per absolute path in ~/.claude.json
+# and a trusted parent doesn't cover a child that is its own git repo, so without this every new
+# workspace -- each a fresh path and a fresh clone -- opens with that prompt. Every repo here was
+# cloned because the user asked the workbench for it, and --dangerously-skip-permissions is already
+# on, so there is nothing for the dialog to protect.
 ENV HOME=/root
 ENV IS_SANDBOX=1
+ENV CLAUDE_CODE_SANDBOXED=1
 ENV PATH="/app/.venv/bin:/root/.local/bin:$PATH"
 
 RUN curl -fsSL https://claude.ai/install.sh | bash

@@ -6,7 +6,7 @@ You work in **projects** and **workspaces** — see [Projects and workspaces](#p
 
 ## What's inside the container
 
-- `@anthropic-ai/claude-code` (npm, installed at image build time). It runs in whichever workspace you opened it from. By default, `claude` is aliased with `--dangerously-skip-permissions` in this sandbox.
+- `@anthropic-ai/claude-code` (npm, installed at image build time). It runs in whichever workspace you opened it from. By default, `claude` is aliased with `--dangerously-skip-permissions` in this sandbox, and the folder-trust dialog is skipped so a new workspace opens straight into the conversation.
 - Python 3 + git + the usual tools.
 - A clone of `https://github.com/imbue-openhost/openhost` placed at `~/openhost` on first container start (override with `OPENHOST_REPO_URL` or `OPENHOST_DIR` env vars).
 - A Claude Code skill at `~/.claude/skills/openhost/` that points Claude at the curated docs in the local openhost clone.
