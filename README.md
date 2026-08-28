@@ -117,6 +117,7 @@ PATCH  /api/projects/{id}   {name?, setup?, default_branch?}
 DELETE /api/projects/{id}
 POST   /api/workspaces      {project_id, name?, ref?}
 DELETE /api/workspaces/{project}/{workspace}
+GET    /api/workspaces/status                 git status of every workspace, in one call
 ```
 
 ## The UI
