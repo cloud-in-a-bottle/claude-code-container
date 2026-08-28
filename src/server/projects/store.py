@@ -4,6 +4,7 @@ import re
 import attr
 
 from server.config import PROJECTS_PATH
+from server.git_remote import REF_RE
 
 # A project id doubles as a directory name (under ~/workspaces and ~/.workbench/mirrors), so it is
 # restricted to characters that are unambiguous on disk and in a URL.
@@ -17,6 +18,9 @@ class Project:
     repo_url: str
     # Optional command run once in a new workspace before Claude starts, e.g. `just setup`.
     setup: str = ""
+    # Branch new workspaces start from. Empty means "whatever the repo's own default branch is",
+    # resolved from the remote at creation time rather than remembered here.
+    default_branch: str = ""
 
 
 def slugify(name: str) -> str:
@@ -55,12 +59,18 @@ def load_projects() -> tuple[Project, ...]:
         project_id = str(entry["id"])
         if not PROJECT_ID_RE.match(project_id):
             raise ValueError(f"malformed project id {project_id!r} in {PROJECTS_PATH}")
+        # Re-checked on the way in, not just on the way out: this ends up on a `git` command line,
+        # and the file is editable by hand.
+        default_branch = str(entry.get("default_branch", ""))
+        if default_branch and not REF_RE.match(default_branch):
+            raise ValueError(f"malformed default branch {default_branch!r} for {project_id} in {PROJECTS_PATH}")
         projects.append(
             Project(
                 id=project_id,
                 name=str(entry.get("name", project_id)),
                 repo_url=str(entry["repo_url"]),
                 setup=str(entry.get("setup", "")),
+                default_branch=default_branch,
             )
         )
     return tuple(projects)
@@ -69,7 +79,16 @@ def load_projects() -> tuple[Project, ...]:
 def save_projects(projects: tuple[Project, ...]) -> None:
     """Persist via a temp file + rename, so an interrupted write can't corrupt the list."""
     PROJECTS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    payload = [{"id": p.id, "name": p.name, "repo_url": p.repo_url, "setup": p.setup} for p in projects]
+    payload = [
+        {
+            "id": p.id,
+            "name": p.name,
+            "repo_url": p.repo_url,
+            "setup": p.setup,
+            "default_branch": p.default_branch,
+        }
+        for p in projects
+    ]
     tmp_path = PROJECTS_PATH.with_name(PROJECTS_PATH.name + ".tmp")
     tmp_path.write_text(json.dumps(payload, indent=2) + "\n")
     tmp_path.replace(PROJECTS_PATH)
@@ -83,13 +102,14 @@ def find_project_by_repo(repo_url: str) -> Project | None:
     return next((p for p in load_projects() if p.repo_url == repo_url), None)
 
 
-def add_project(name: str, repo_url: str, setup: str = "") -> Project:
+def add_project(name: str, repo_url: str, setup: str = "", default_branch: str = "") -> Project:
     projects = load_projects()
     project = Project(
         id=unique_project_id(slugify(name), frozenset(p.id for p in projects)),
         name=name.strip(),
         repo_url=repo_url,
         setup=setup.strip(),
+        default_branch=default_branch.strip(),
     )
     save_projects((*projects, project))
     return project

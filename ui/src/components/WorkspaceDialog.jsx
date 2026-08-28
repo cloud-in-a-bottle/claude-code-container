@@ -7,6 +7,7 @@ import { Field, Modal } from './Modal';
 export function WorkspaceDialog(props) {
   const [name, setName] = createSignal('');
   const [ref, setRef] = createSignal('');
+  const fallback = () => props.project.default_branch || "the repo's default branch";
 
   return (
     <Modal
@@ -20,8 +21,8 @@ export function WorkspaceDialog(props) {
         label="Ref (optional)"
         value={ref}
         onInput={setRef}
-        placeholder="leave blank for the default branch"
-        hint="A branch, tag, or commit to check out."
+        placeholder={`leave blank for ${fallback()}`}
+        hint={`A branch, tag, or commit to check out. Blank starts from ${fallback()}, at its newest commit.`}
       />
     </Modal>
   );

@@ -60,6 +60,39 @@ def test_inject_github_token_leaves_ssh_unchanged() -> None:
     assert git_remote.inject_github_token("ssh://git@github.com/o/r.git", "t") == "ssh://git@github.com/o/r.git"
 
 
+# ── the remote's own default branch ───────────────────────────────────────────
+
+
+def test_resolve_default_branch_reads_the_symref(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _stub_ls_remote(
+        monkeypatch,
+        [(0, "ref: refs/heads/trunk\tHEAD\n1111111111111111111111111111111111111111\tHEAD\n", "")],
+    )
+    assert run(git_remote.resolve_default_branch("https://github.com/o/r.git", token="ghs_tok")) == "trunk"
+    assert calls == [("https://github.com/o/r.git", "HEAD", "ghs_tok")]
+
+
+def test_resolve_default_branch_handles_a_slash(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_ls_remote(monkeypatch, [(0, "ref: refs/heads/release/2.x\tHEAD\n", "")])
+    assert run(git_remote.resolve_default_branch("https://github.com/o/r.git")) == "release/2.x"
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        (128, "", "fatal: could not read Username"),  # unreachable
+        (0, "1111111111111111111111111111111111111111\tHEAD\n", ""),  # no symref line (old git)
+        (0, "", ""),  # empty repo
+    ],
+)
+def test_resolve_default_branch_gives_up_quietly(
+    monkeypatch: pytest.MonkeyPatch, result: tuple[int, str, str]
+) -> None:
+    """Callers fall back to the mirror's HEAD, so an unreadable answer must not raise."""
+    _stub_ls_remote(monkeypatch, [result])
+    assert run(git_remote.resolve_default_branch("https://github.com/o/r.git")) == ""
+
+
 # ── _resolve_access classification ────────────────────────────────────────────
 
 
@@ -70,7 +103,7 @@ def _stub_ls_remote(
     calls: list[tuple[str, str | None, str]] = []
     queue = list(results)
 
-    async def fake(repo: str, ref: str | None, token: str) -> tuple[int, str, str]:
+    async def fake(repo: str, ref: str | None, token: str, symref: bool = False) -> tuple[int, str, str]:
         calls.append((repo, ref, token))
         return queue.pop(0)
 

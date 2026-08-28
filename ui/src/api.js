@@ -15,8 +15,8 @@ async function request(method, url, body) {
 }
 
 export const listProjects = () => request('GET', '/api/projects');
-export const createProject = (repoUrl, name, setup) =>
-  request('POST', '/api/projects', { repo_url: repoUrl, name, setup });
+export const createProject = (repoUrl, name, setup, defaultBranch) =>
+  request('POST', '/api/projects', { repo_url: repoUrl, name, setup, default_branch: defaultBranch });
 export const updateProject = (id, patch) => request('PATCH', `/api/projects/${encodeURIComponent(id)}`, patch);
 export const deleteProject = (id) => request('DELETE', `/api/projects/${encodeURIComponent(id)}`);
 

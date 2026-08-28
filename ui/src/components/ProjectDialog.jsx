@@ -10,11 +10,16 @@ export function ProjectDialog(props) {
   const [repoUrl, setRepoUrl] = createSignal(editing()?.repo_url || '');
   const [name, setName] = createSignal(editing()?.name || '');
   const [setup, setSetup] = createSignal(editing()?.setup || '');
+  const [defaultBranch, setDefaultBranch] = createSignal(editing()?.default_branch || '');
 
   const submit = () =>
     editing()
-      ? updateProject(editing().id, { name: name(), setup: setup() })
-      : createProject(repoUrl().trim(), name().trim(), setup().trim());
+      ? updateProject(editing().id, {
+          name: name(),
+          setup: setup(),
+          default_branch: defaultBranch().trim(),
+        })
+      : createProject(repoUrl().trim(), name().trim(), setup().trim(), defaultBranch().trim());
 
   return (
     <Modal
@@ -32,6 +37,13 @@ export function ProjectDialog(props) {
         hint={editing() ? 'Fixed once the project exists.' : ''}
       />
       <Field label="Name (optional)" value={name} onInput={setName} placeholder="defaults to the repo name" />
+      <Field
+        label="Default branch (optional)"
+        value={defaultBranch}
+        onInput={setDefaultBranch}
+        placeholder="defaults to the repo's own default branch"
+        hint="New workspaces start from the tip of this branch, freshly fetched from the remote."
+      />
       <Field
         label="Setup command (optional)"
         value={setup}
