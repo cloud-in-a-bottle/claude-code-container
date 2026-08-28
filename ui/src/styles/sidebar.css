@@ -1,0 +1,101 @@
+/* The projects/workspaces rail down the left-hand side. Colours come from themes.css. */
+
+#sidebar {
+  flex: 0 0 220px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--chrome-bg);
+  border-right: 1px solid var(--border);
+  user-select: none;
+  font-size: 13px;
+}
+body.sidebar-hidden #sidebar { display: none; }
+
+#sidebar-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 6px 7px 12px;
+  border-bottom: 1px solid var(--border);
+  min-height: 32px;
+  box-sizing: border-box;
+}
+#sidebar-title {
+  flex: 1;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+#add-project, #sidebar-collapse {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--faint);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: inherit;
+}
+#add-project:hover, #sidebar-collapse:hover { color: var(--bright); background: var(--hover-bg); border-color: var(--menu-border); }
+
+/* Only shown while the rail is hidden, so the rail can be brought back. */
+#sidebar-toggle {
+  display: none;
+  align-items: center;
+  padding: 0 12px;
+  cursor: pointer;
+  color: var(--faint);
+  font-size: 14px;
+}
+body.sidebar-hidden #sidebar-toggle { display: flex; }
+#sidebar-toggle:hover { color: var(--bright); }
+
+#project-list { flex: 1; overflow-y: auto; padding: 4px 0 12px; }
+
+.project { padding-top: 2px; }
+.project-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px 4px 8px;
+  cursor: pointer;
+  color: var(--fg);
+}
+.project-row:hover { background: var(--hover-bg); }
+.project-caret { width: 10px; text-align: center; color: var(--faint); font-size: 9px; }
+.project-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Row actions stay out of the way until the row is hovered or focused. */
+.row-btn {
+  background: none;
+  border: none;
+  color: var(--faint);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 1px 4px;
+  border-radius: 3px;
+  visibility: hidden;
+  font-family: inherit;
+}
+.project-row:hover .row-btn, .workspace-row:hover .row-btn, .row-btn:focus-visible { visibility: visible; }
+.row-btn:hover { color: var(--bright); background: var(--menu-bg); }
+.row-btn.danger:hover { color: var(--danger); }
+
+.workspace-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px 3px 26px;
+  cursor: pointer;
+  color: var(--muted);
+}
+.workspace-row:hover { background: var(--hover-bg); color: var(--bright); }
+.workspace-row.active { background: var(--bg); color: var(--bright); box-shadow: inset 2px 0 0 var(--accent); }
+.workspace-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.sidebar-empty { padding: 10px 12px; color: var(--menu-desc); font-size: 12px; line-height: 1.5; }
+.project-empty { padding: 2px 6px 2px 26px; color: var(--menu-desc); font-size: 12px; font-style: italic; }

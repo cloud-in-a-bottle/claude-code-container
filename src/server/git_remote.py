@@ -6,7 +6,6 @@ import urllib.parse
 
 import attr
 
-from server.config import APP_DIR
 from server.remote_services import fetch_github_token
 
 # A git ref/sha: no leading dash (would be read as a `git checkout` flag) and a conservative
@@ -16,10 +15,6 @@ REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 # A ref that looks like a bare commit sha. `git ls-remote` only lists named refs, so a sha can't
 # be validated ahead of the clone — we skip the pre-check and let the checkout degrade gracefully.
 SHA_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
-
-# The open-workspace terminal runs this script. It takes all its inputs from env vars, so there's
-# nothing to interpolate here and no shell injection surface.
-WORKSPACE_SCRIPT = APP_DIR / "open_workspace.sh"
 
 _NETWORK_ERR_RE = re.compile(
     r"could ?n.?t resolve host|could not resolve|failed to connect|connection (timed out|refused)"

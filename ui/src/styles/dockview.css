@@ -1,0 +1,68 @@
+/* The workbench's dockview theme.
+ *
+ * A dockview theme is just a class name carrying its own CSS variables, so instead of switching
+ * between dockview's bundled themes we map its variables onto the workbench palette. The colour
+ * scheme picker then restyles the tab strip, sashes and drop overlays for free. */
+
+.wb-dockview {
+  --dv-background-color: var(--bg);
+  --dv-group-view-background-color: var(--bg);
+  --dv-content-container-background-color: var(--bg);
+
+  --dv-tabs-and-actions-container-background-color: var(--chrome-bg);
+  --dv-tabs-and-actions-container-height: 32px;
+  --dv-tabs-and-actions-container-font-size: 13px;
+  --dv-tab-font-size: 13px;
+  --dv-tabs-container-border-color: var(--border);
+  --dv-tab-divider-color: var(--border);
+  --dv-tab-hover-background-color: var(--hover-bg);
+
+  --dv-activegroup-visiblepanel-tab-background-color: var(--bg);
+  --dv-activegroup-visiblepanel-tab-color: var(--bright);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--chrome-bg);
+  --dv-activegroup-hiddenpanel-tab-color: var(--muted);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--bg);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--muted);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--chrome-bg);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--faint);
+
+  --dv-active-group-border-color: var(--accent);
+  --dv-inactive-group-border-color: var(--border);
+  --dv-separator-border: var(--border);
+  --dv-sash-color: transparent;
+  --dv-active-sash-color: var(--accent);
+  --dv-drag-over-background-color: color-mix(in srgb, var(--accent) 22%, transparent);
+  --dv-drag-over-border-color: var(--accent);
+  --dv-icon-hover-background-color: var(--hover-bg);
+  --dv-scrollbar-background-color: var(--border);
+  --dv-floating-box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* The + that opens another terminal in a group, mounted in the group's header. */
+.dv-group-actions { display: flex; align-items: center; height: 100%; padding-right: 4px; }
+.dv-group-actions button {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--faint);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-family: inherit;
+}
+.dv-group-actions button:hover { color: var(--bright); background: var(--hover-bg); border-color: var(--menu-border); }
+
+/* Shown when the layout has no panels at all. */
+.dv-watermark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+  color: var(--faint);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.dv-watermark .wb-btn { margin-left: 6px; }

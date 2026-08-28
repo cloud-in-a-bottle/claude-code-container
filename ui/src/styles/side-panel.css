@@ -1,0 +1,49 @@
+/* The opt-in side-by-side pane: an iframe beside the terminals. */
+
+#sp-divider {
+  flex: 0 0 6px;
+  background: var(--chrome-bg);
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  cursor: col-resize;
+}
+#sp-divider:hover, body.sp-dragging #sp-divider { background: var(--hover-bg); }
+#sp-divider:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+#sp-side { min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
+#sp-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: var(--chrome-bg);
+  border-bottom: 1px solid var(--border);
+}
+#sp-url {
+  flex: 1;
+  min-width: 0;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 3px;
+  padding: 3px 7px;
+  font-size: 12px;
+  font-family: ui-monospace, Menlo, monospace;
+}
+#sp-url:focus { outline: none; border-color: var(--btn-border); }
+.sp-btn {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--faint);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  line-height: 1.4;
+  font-family: inherit;
+}
+.sp-btn:hover { color: var(--bright); background: var(--hover-bg); border-color: var(--menu-border); }
+#sp-frame { flex: 1; width: 100%; border: 0; background: var(--bg); }
+
+body.sp-dragging { user-select: none; }
+body.sp-dragging #sp-frame { pointer-events: none; }

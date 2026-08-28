@@ -18,7 +18,8 @@ import attr
 from litestar import WebSocket
 
 from server.config import HOME
-from server.config import MY_PROJECT_DIR
+from server.projects.workspaces import Workspace
+from server.projects.workspaces import parse_workspace_id
 from server.remote_services import get_anthropic_key
 from server.tab_store import CLAUDE
 from server.tab_store import SHELL
@@ -31,8 +32,6 @@ _KICKED_MSG = b"\x01" + json.dumps({"type": "kicked"}).encode()
 
 _tabs: dict[str, ServerTab] = {}
 _tab_counter: int = 0
-_claude_tab_created: bool = False
-_active_cwd: str | None = None  # set via set_active_cwd(); used as cwd for all new tabs
 _last_persisted: list[PersistedTab] = []
 _restoring: bool = False  # see restore_tabs(): suppresses the partial writes a restore would make
 
@@ -54,13 +53,6 @@ def claude_session_command(claude_bin: str, session_id: str, *, resume_first: bo
     create = f"{claude} --session-id {sid} --dangerously-skip-permissions"
     resume = f"{claude} --resume {sid} --dangerously-skip-permissions"
     return f"{resume} || {create}" if resume_first else f"{create} || {resume}"
-
-
-def set_active_cwd(path: str) -> None:
-    """Point all future tabs at a new working directory and mark the Claude tab as claimed."""
-    global _active_cwd, _claude_tab_created
-    _active_cwd = path
-    _claude_tab_created = True
 
 
 def _proc_name(pgid: int) -> str:
@@ -128,6 +120,9 @@ class ServerTab:
     kind: str = SHELL
     start_cwd: str = str(HOME)
     session_id: str = ""
+    # The workspace this tab belongs to, as `<project>/<workspace>`. Tabs are only ever shown in
+    # their own workspace, and a tab whose workspace has been deleted is not restored.
+    workspace_id: str = ""
     lock: asyncio.Lock = attr.Factory(asyncio.Lock)
     connected: bool = False
     alive: bool = True
@@ -184,6 +179,7 @@ async def create_server_tab(
     kind: str = SHELL,
     tab_id: str | None = None,
     session_id: str = "",
+    workspace_id: str = "",
 ) -> ServerTab:
     """Start a tab. `kind` is what a restore should recreate, not necessarily what `command` runs.
 
@@ -219,6 +215,7 @@ async def create_server_tab(
         kind=kind,
         start_cwd=cwd or str(HOME),
         session_id=session_id,
+        workspace_id=workspace_id,
     )
     _tabs[tab_id] = tab
 
@@ -254,7 +251,14 @@ def _tab_cwd(tab: ServerTab) -> str:
 def tab_snapshot() -> list[PersistedTab]:
     """The live tabs, in the form a restore needs. Dead tabs are dropped rather than resurrected."""
     return [
-        PersistedTab(id=t.id, label=t.label, kind=t.kind, cwd=_tab_cwd(t), session_id=t.session_id)
+        PersistedTab(
+            id=t.id,
+            label=t.label,
+            kind=t.kind,
+            cwd=_tab_cwd(t),
+            session_id=t.session_id,
+            workspace_id=t.workspace_id,
+        )
         for t in _tabs.values()
         if t.alive
     ]
@@ -312,7 +316,7 @@ async def restore_tabs() -> list[ServerTab]:
 
     Called once at startup, before any client connects.
     """
-    global _claude_tab_created, _restoring
+    global _restoring
     persisted = load_tabs()
     if not persisted:
         return []
@@ -325,24 +329,31 @@ async def restore_tabs() -> list[ServerTab]:
     _restoring = True
     try:
         for entry in persisted:
-            # The directory can be gone — a repo removed, or a temp dir cleaned up between runs.
+            workspace = parse_workspace_id(entry.workspace_id)
+            # A tab is only meaningful inside its workspace, so one whose workspace has been
+            # deleted (or which predates workspaces entirely) is dropped rather than resurrected
+            # somewhere arbitrary.
+            if workspace is None or not workspace.path.is_dir():
+                print(f"[tabs] dropping tab {entry.label!r}: workspace {entry.workspace_id!r} is gone", flush=True)
+                continue
+            # The tab's own cwd can still be gone even when the workspace isn't — a subdirectory
+            # it was sitting in got deleted, say.
             cwd_ok = Path(entry.cwd).is_dir()
             restored.append(
                 await create_server_tab(
                     command=restore_command(entry.kind, claude_bin, entry.session_id, continue_ok=cwd_ok),
-                    cwd=entry.cwd if cwd_ok else str(HOME),
+                    cwd=entry.cwd if cwd_ok else str(workspace.path),
                     env=env,
                     label=entry.label,
                     kind=entry.kind,
                     tab_id=entry.id,
                     session_id=entry.session_id,
+                    workspace_id=entry.workspace_id,
                 )
             )
     finally:
         _restoring = False
     persist_tabs()
-    # Whatever the restored mix is, the "first tab runs Claude" rule has already had its say.
-    _claude_tab_created = True
     print(f"[tabs] restored {len(restored)} tab(s) from the previous run", flush=True)
     return restored
 
@@ -372,41 +383,39 @@ def kill_tab(tab: ServerTab) -> None:
     persist_tabs()
 
 
-async def new_bash_tab(label: str | None = None) -> ServerTab:
-    """Create a new tab. The first tab runs Claude Code; all others open plain bash in HOME."""
-    global _claude_tab_created
-    if not _claude_tab_created:
-        _claude_tab_created = True
-        key = await get_anthropic_key()
-        env: dict[str, str] = {}
-        if key:
-            env["ANTHROPIC_API_KEY"] = key
-        claude_bin = shutil.which("claude") or "claude"
-        cwd = _active_cwd or (str(MY_PROJECT_DIR) if MY_PROJECT_DIR.exists() else str(HOME))
-        session_id = new_session_id()
-        # A retry that follows a crash must rejoin the session the crashed attempt created, not
-        # collide with it — claude rejects --session-id for an id that already exists.
-        attempt = claude_session_command(claude_bin, session_id, resume_first=False)
-        return await create_server_tab(
-            command=[
-                "bash",
-                "-l",
-                "-c",
-                f"for _i in 1 2 3; do {{ {attempt}; }} && break; sleep 1; done; exec bash",
-            ],
-            cwd=cwd,
-            env=env,
-            label=label,
-            kind=CLAUDE,
-            session_id=session_id,
-        )
-    else:
+def tabs_for_workspace(workspace_id: str) -> list[ServerTab]:
+    return [t for t in _tabs.values() if t.workspace_id == workspace_id]
+
+
+async def new_tab_in_workspace(workspace: Workspace, label: str | None = None) -> ServerTab:
+    """Open a tab in a workspace. The workspace's first tab runs Claude; the rest are plain bash."""
+    cwd = str(workspace.path)
+    live = [t for t in tabs_for_workspace(workspace.id) if t.alive]
+    if live:
         return await create_server_tab(
             command=["bash", "-l"],
-            cwd=_active_cwd or str(HOME),
+            cwd=cwd,
             label=label,
             kind=SHELL,
+            workspace_id=workspace.id,
         )
+
+    key = await get_anthropic_key()
+    env: dict[str, str] = {"ANTHROPIC_API_KEY": key} if key else {}
+    claude_bin = shutil.which("claude") or "claude"
+    session_id = new_session_id()
+    # A retry that follows a crash must rejoin the session the crashed attempt created, not
+    # collide with it — claude rejects --session-id for an id that already exists.
+    attempt = claude_session_command(claude_bin, session_id, resume_first=False)
+    return await create_server_tab(
+        command=["bash", "-l", "-c", f"for _i in 1 2 3; do {{ {attempt}; }} && break; sleep 1; done; exec bash"],
+        cwd=cwd,
+        env=env,
+        label=label or "claude",
+        kind=CLAUDE,
+        session_id=session_id,
+        workspace_id=workspace.id,
+    )
 
 
 async def handle_terminal_ws(socket: WebSocket[Any, Any, Any]) -> None:

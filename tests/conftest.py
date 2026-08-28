@@ -1,8 +1,12 @@
 from collections.abc import Iterator
+from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
 
 import pytest
+
+from server.projects import store
+from server.projects import workspaces
 
 if TYPE_CHECKING:
     from openhost_test_harness import OpenhostStack
@@ -29,3 +33,12 @@ def stack() -> Iterator[OpenhostStack]:
     )
     with harness.OpenhostStack() as s:
         yield s
+
+
+@pytest.fixture
+def workbench_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point every piece of on-disk workbench state at a temp dir, so tests never touch $HOME."""
+    monkeypatch.setattr(store, "PROJECTS_PATH", tmp_path / ".workbench" / "projects.json")
+    monkeypatch.setattr(workspaces, "WORKSPACES_ROOT", tmp_path / "workspaces")
+    monkeypatch.setattr(workspaces, "MIRRORS_DIR", tmp_path / ".workbench" / "mirrors")
+    return tmp_path

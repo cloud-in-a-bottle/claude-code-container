@@ -1,0 +1,54 @@
+/* Dialogs: add or configure a project, create a workspace, confirm a delete. */
+
+#wb-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+.wb-modal {
+  background: var(--menu-bg);
+  border: 1px solid var(--menu-border);
+  border-radius: 6px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  min-width: 380px;
+  max-width: 90vw;
+  padding: 16px 18px;
+  font-size: 13px;
+  color: var(--fg);
+}
+.wb-modal h2 { margin: 0 0 12px; font-size: 14px; font-weight: 600; color: var(--bright); }
+.wb-modal label { display: block; margin-bottom: 10px; color: var(--muted); font-size: 12px; }
+.wb-modal input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 4px;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 3px;
+  padding: 5px 8px;
+  font-size: 13px;
+  font-family: ui-monospace, Menlo, monospace;
+}
+.wb-modal input:focus { outline: none; border-color: var(--accent); }
+.wb-modal .wb-hint { color: var(--menu-desc); font-size: 11px; margin: -6px 0 12px; }
+.wb-modal .wb-error { color: var(--danger); font-size: 12px; margin: 0 0 10px; white-space: pre-wrap; }
+.wb-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.wb-btn {
+  padding: 5px 14px;
+  border: 1px solid var(--btn-border);
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+}
+.wb-btn:hover { background: var(--hover-bg); color: var(--bright); }
+.wb-btn[disabled] { opacity: 0.5; cursor: default; }
+.wb-btn.danger:hover { color: var(--danger); border-color: var(--danger); }

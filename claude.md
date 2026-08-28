@@ -1,6 +1,7 @@
 - read README.md and style_guide.md at the beginning of every session.
-- on first init, run `just setup` — this installs dependencies, the pre-commit hooks, and the playwright chromium browser. pre-commit runs ruff and mypy on commit.
+- on first init, run `just setup` — this installs dependencies, the pre-commit hooks, the playwright chromium browser, and builds the frontend. pre-commit runs ruff and mypy on commit.
 - use uv for all python work (`uv run ...`, `uv add ...`, `uv sync`).
+- the frontend is a solid app in `ui/`, built by vite into `src/server/static/ui/` (generated, not committed). use npm inside `ui/` for js deps. after changing anything under `ui/`, run `just build-ui` or the server will keep serving the old bundle. terminals are laid out with dockview (`@arminmajerie/dockview-solid`).
 - this is an OpenHost app. `openhost.toml` is the app manifest.
 - the app is a litestar/hypercorn backend that serves on port 5000 and exposes a `/health` endpoint. see "deploying & debugging on openhost" below.
 - `just test` runs the fast unit tests and needs nothing but python. `just test-integration` uses the OpenHost test harness (the `openhost[test-harness]` package, imported as `openhost_test_harness`): it builds the Dockerfile, runs the app under podman per `openhost.toml`, and fronts it with the real OpenHost router, so it requires podman running on the host. `stack.url` goes through the router and requires owner auth (use `stack.owner_session` for requests, or `stack.playwright_login(page)` for browser tests); `stack.app_url` hits the container directly.
@@ -18,7 +19,8 @@
 
 - this app *is* a workbench for hacking on openhost apps, so it is also its own dogfood: the container ships claude code, the `oh` cli, and a checkout of this repo at `~/claude-code-container`. edits made there are discarded on the next image rebuild — see README.md.
 - the container runs as root on purpose, under rootless podman with `cap-drop=ALL` and `no-new-privileges`. `IS_SANDBOX=1` is what lets claude code accept `--dangerously-skip-permissions` as uid 0. don't "fix" either without reading the comments in the Dockerfile.
-- `$HOME` is repointed at the openhost app-data dir by `entrypoint.sh`, so anything that must survive a redeploy (tab list, ui settings, claude's own conversation history) belongs under `$HOME`, never `/app`.
-- terminal tabs and their claude sessions are restored across restarts. tabs persist to `$HOME/.workbench/tabs.json`; each claude tab pins a `--session-id` uuid so a restore reattaches to that exact conversation.
+- `$HOME` is repointed at the openhost app-data dir by `entrypoint.sh`, so anything that must survive a redeploy (projects, workspaces, tab list, ui settings, claude's own conversation history) belongs under `$HOME`, never `/app`.
+- the model is projects (a git repo + a bare mirror) and workspaces (one full copy of it at `~/workspaces/<project>/<workspace>`). there is deliberately no canonical checkout. the workspace list is read off disk, not tracked in a file — don't add a second source of truth for it. see README.md.
+- terminal tabs and their claude sessions are restored across restarts. tabs persist to `$HOME/.workbench/tabs.json`; each tab belongs to a workspace and each claude tab pins a `--session-id` uuid so a restore reattaches to that exact conversation. a tab whose workspace is gone is dropped rather than restored somewhere arbitrary.
 - if you run into any cases where the app test harness doesn't match the expected/real behavior of openhost, stop and mention this so that we can fix the test harness - don't just make some workaround to the issue.
 - if you run into cases where openhost itself doesn't behave as expected, also stop and mention this so we can open a PR there to fix upstream.

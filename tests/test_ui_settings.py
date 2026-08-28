@@ -152,14 +152,14 @@ def test_theme_names_match_the_client() -> None:
 
     A name the server accepts but the client can't paint would silently render an unstyled UI.
     """
-    here = Path(__file__).parent.parent / "src" / "server"
+    root = Path(__file__).parent.parent
 
-    js = (here / "static" / "theme.js").read_text()
+    js = (root / "ui" / "src" / "themes.js").read_text()
     # keys of the THEMES map, e.g.   'solarized-light': {
     js_names = set(re.findall(r"^\s*'([a-z0-9-]+)':\s*\{$", js, re.MULTILINE))
     assert js_names == set(ui_settings.THEMES)
 
-    css = (here / "static" / "themes.css").read_text()
+    css = (root / "src" / "server" / "static" / "themes.css").read_text()
     css_names = set(re.findall(r'\[data-theme="([a-z0-9-]+)"\]', css))
     # the default theme is the bare :root block rather than an attribute selector
     assert css_names == set(ui_settings.THEMES) - {ui_settings.DEFAULT_THEME}
@@ -172,23 +172,21 @@ def test_index_carries_the_theme_for_a_flash_free_load() -> None:
     client.post("/api/ui/settings", json={"theme": "solarized-light"})
     body = client.get("/").text
     assert 'data-theme="solarized-light"' in body
-    assert "/static/theme.js" in body
+    # the client is told too, so it can populate the picker without a second round trip
+    assert '"theme": "solarized-light"' in body
 
 
-# ── the toggle actually changes the page ───────────────────────────────────────
+# ── the toggle actually reaches the client ─────────────────────────────────────
 
 
-def test_index_omits_panel_script_by_default() -> None:
-    resp = _client().get("/")
-    assert resp.status_code == 200
-    assert "side-panel.js" not in resp.text
-
-
-def test_index_includes_panel_script_when_enabled() -> None:
+def test_index_reports_the_panel_setting() -> None:
     client = _client()
+    body = client.get("/").text
+    assert '"side_panel": false' in body
+
     client.post("/api/ui/settings", json={"side_panel": True})
     body = client.get("/").text
-    assert "side-panel.js" in body
-    # the terminal UI must still be intact
-    assert "app.js" in body
-    assert 'id="panes"' in body
+    assert '"side_panel": true' in body
+    # the app itself must still be there
+    assert "/static/ui/bundle.js" in body
+    assert 'id="root"' in body

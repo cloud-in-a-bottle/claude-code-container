@@ -1,3 +1,13 @@
+# The Solid frontend. vite writes to ../src/server/static/ui, which from /ui is /src/server/static/ui
+# in this stage; the runtime image copies that in over the source tree.
+FROM node:22-slim AS ui
+WORKDIR /ui
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci
+COPY ui/ ./
+RUN npm run build
+
+
 FROM ubuntu:26.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -34,8 +44,9 @@ RUN uv sync --frozen --no-dev --no-install-project
 # Site rcfile lives under /etc so $HOME — repointed at the persistent data dir at
 # runtime — stays untouched and user edits to ~/.bashrc survive image updates.
 COPY . /app
+COPY --from=ui /src/server/static/ui /app/src/server/static/ui
 RUN uv sync --frozen --no-dev \
-    && chmod +x /app/*.sh /app/src/server/*.sh \
+    && chmod +x /app/*.sh /app/src/server/projects/*.sh \
     && cp /app/workbench.sh /etc/profile.d/workbench.sh \
     && echo '[ -r /etc/profile.d/workbench.sh ] && . /etc/profile.d/workbench.sh' >> /etc/bash.bashrc
 

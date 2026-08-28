@@ -74,8 +74,6 @@ seed_checkouts() {
     echo "[entrypoint] checkouts ready"
 }
 
-mkdir -p "$HOME/my_project"
-
 # Link every bundled skill into the user's skill dir, replacing whatever is already there. $HOME
 # persists across rebuilds, so without the replace an old link (or a directory shadowing the name)
 # would pin an existing workbench to whatever it first saw. Bundled skill names are therefore

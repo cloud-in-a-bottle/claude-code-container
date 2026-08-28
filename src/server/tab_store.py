@@ -23,6 +23,8 @@ class PersistedTab:
     # reattach to this exact conversation instead of whichever one was last used in the directory.
     # Empty for shell tabs, and for any tab file written without one.
     session_id: str = ""
+    # `<project>/<workspace>`. A tab without one predates workspaces and isn't restored.
+    workspace_id: str = ""
 
 
 def load_tabs() -> list[PersistedTab]:
@@ -59,6 +61,7 @@ def load_tabs() -> list[PersistedTab]:
                 kind=CLAUDE if entry.get("kind") == CLAUDE else SHELL,
                 cwd=str(entry.get("cwd", HOME)),
                 session_id=str(entry.get("session_id", "")),
+                workspace_id=str(entry.get("workspace_id", "")),
             )
         )
     return loaded
@@ -67,7 +70,17 @@ def load_tabs() -> list[PersistedTab]:
 def save_tabs(tabs: list[PersistedTab]) -> None:
     """Persist via a temp file + rename, so an interrupted write can't corrupt the list."""
     TABS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    payload = [{"id": t.id, "label": t.label, "kind": t.kind, "cwd": t.cwd, "session_id": t.session_id} for t in tabs]
+    payload = [
+        {
+            "id": t.id,
+            "label": t.label,
+            "kind": t.kind,
+            "cwd": t.cwd,
+            "session_id": t.session_id,
+            "workspace_id": t.workspace_id,
+        }
+        for t in tabs
+    ]
     tmp_path = TABS_PATH.with_name(TABS_PATH.name + ".tmp")
     tmp_path.write_text(json.dumps(payload, indent=2) + "\n")
     tmp_path.replace(TABS_PATH)

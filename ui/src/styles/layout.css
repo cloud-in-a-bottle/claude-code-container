@@ -1,0 +1,109 @@
+/* Page frame: the sidebar rail, the workspace bar, and the terminal panels inside dockview.
+ * Colours come from the CSS variables in static/themes.css. */
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, system-ui, sans-serif;
+}
+body { display: flex; flex-direction: row; }
+#root { display: contents; }
+
+#main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+#topbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  padding-right: 6px;
+  background: var(--chrome-bg);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+  font-size: 13px;
+}
+#workspace-label { padding: 0 6px 0 12px; color: var(--muted); white-space: nowrap; font-size: 12px; }
+#workspace-label b { color: var(--bright); font-weight: 600; }
+#workspace-label .sep { color: var(--faint); }
+#topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+
+#new-terminal, .bar-btn {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--faint);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  font-family: inherit;
+  white-space: nowrap;
+}
+#new-terminal:hover, .bar-btn:hover { color: var(--bright); background: var(--hover-bg); border-color: var(--menu-border); }
+
+#theme-picker {
+  background: var(--input-bg);
+  color: var(--btn-fg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 12px;
+  padding: 2px 4px;
+  font-family: inherit;
+  cursor: pointer;
+}
+#theme-picker:hover { color: var(--bright); border-color: var(--btn-border); }
+#theme-picker:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+#sp-split { flex: 1; display: flex; min-height: 0; }
+#sp-left { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+#terminal-layout { flex: 1; min-height: 0; }
+
+/* Positioned so the busy overlay covers this terminal rather than the whole layout. */
+.terminal-panel { position: relative; width: 100%; height: 100%; padding: 4px; box-sizing: border-box; }
+.terminal-panel > .term { width: 100%; height: 100%; }
+
+.busy-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  background: var(--overlay-bg);
+  color: var(--overlay-fg);
+  font-size: 14px;
+  z-index: 10;
+  text-align: center;
+  padding: 16px;
+}
+.busy-actions { display: flex; gap: 12px; }
+.busy-btn {
+  padding: 6px 16px;
+  border: 1px solid var(--btn-border);
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 13px;
+  font-family: inherit;
+}
+.busy-btn:hover { background: var(--hover-bg); color: var(--bright); border-color: var(--muted); }
+
+/* ---- popup menus ---------------------------------------------------------- */
+
+.tab-menu {
+  position: fixed;
+  background: var(--menu-bg);
+  border: 1px solid var(--menu-border);
+  border-radius: 4px;
+  z-index: 1000;
+  min-width: 180px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+.tab-menu-item { padding: 8px 14px; cursor: pointer; font-size: 13px; color: var(--fg); white-space: nowrap; }
+.tab-menu-item:hover { background: var(--hover-bg); color: var(--bright); }
+.tab-menu-desc { font-size: 11px; color: var(--menu-desc); margin-top: 1px; }
+.tab-menu-sep { height: 1px; background: var(--menu-border); margin: 4px 0; }
