@@ -1,13 +1,3 @@
-# The Solid frontend. vite writes to ../src/server/static/ui, which from /ui is /src/server/static/ui
-# in this stage; the runtime image copies that in over the source tree.
-FROM node:22-slim AS ui
-WORKDIR /ui
-COPY ui/package.json ui/package-lock.json ./
-RUN npm ci
-COPY ui/ ./
-RUN npm run build
-
-
 FROM ubuntu:26.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -15,6 +5,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gh glab \
         git tini bash sudo less vim man-db ca-certificates curl wget gnupg \
+        nodejs npm \
         htop tree jq ripgrep fd-find fzf tmux ncdu \
         unzip zip file \
     && rm -rf /var/lib/apt/lists/*
@@ -50,6 +41,12 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
+# The frontend's dependencies, on their own layer for the same reason: the manifests come over
+# without the source, so editing ui/ rebuilds the bundle without reinstalling. They stay in the
+# image rather than being discarded with a build stage, so the bundle can be rebuilt in place.
+COPY ui/package.json ui/package-lock.json ./ui/
+RUN cd ui && npm ci && npm cache clean --force
+
 # Site rcfile lives under /etc so $HOME — repointed at the persistent data dir at
 # runtime — stays untouched and user edits to ~/.bashrc survive image updates.
 COPY workbench.sh ./
@@ -72,11 +69,13 @@ COPY src/ ./src/
 RUN uv sync --frozen --no-dev \
     && chmod +x /app/src/server/projects/*.sh
 
-# Built by the `ui` stage above, into the static dir the server already serves.
-COPY --from=ui /src/server/static/ui ./src/server/static/ui
+# The Solid frontend. .dockerignore drops **/node_modules, so this copy lands beside the
+# dependencies installed above rather than over them. vite's outDir is ../src/server/static/ui,
+# which from /app/ui is the static dir the server already serves.
+COPY ui/ ./ui/
+RUN cd ui && npm run build
 
 # Not used at runtime; carried so the image is a complete copy of what built it.
-COPY ui/ ./ui/
 COPY tests/ ./tests/
 
 # Must stay after every COPY: it then regenerates exactly when image content changed and
