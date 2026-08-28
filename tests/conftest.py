@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from server import claude_sessions
+from server import claude_trust
 from server import tab_store
 from server import tabs
 from server import ui_settings
@@ -48,6 +49,7 @@ _STATE_PATHS: tuple[tuple[Any, str, str], ...] = (
     (tab_store, "TABS_PATH", ".workbench/tabs.json"),
     (ui_settings, "UI_SETTINGS_PATH", ".workbench/ui.json"),
     (claude_sessions, "CLAUDE_PROJECTS_DIR", ".claude/projects"),
+    (claude_trust, "CLAUDE_CONFIG_PATH", ".claude.json"),
 )
 
 
