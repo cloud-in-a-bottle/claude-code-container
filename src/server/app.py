@@ -23,6 +23,7 @@ from server.routes.editor import editor_proxy
 from server.routes.editor import list_editors
 from server.routes.editor import start_editor
 from server.routes.editor import stop_editor
+from server.routes.images import create_pasted_image
 from server.routes.open_workspace import open_workspace
 from server.routes.pages import health
 from server.routes.pages import index
@@ -40,6 +41,7 @@ from server.routes.tabs import list_tabs
 from server.routes.tabs import terminal_ws
 from server.routes.ui import get_ui_settings
 from server.routes.ui import update_ui_settings
+from server.signals import survive_hangups
 from server.tabs import persist_tabs_periodically
 from server.tabs import restore_tabs
 from server.ui_settings import load_ui_settings
@@ -86,6 +88,7 @@ app = Litestar(
         kick_tab_client,
         delete_tab,
         open_workspace,
+        create_pasted_image,
         list_editors,
         start_editor,
         stop_editor,
@@ -100,6 +103,8 @@ app = Litestar(
 
 
 def main() -> None:
+    # Before the event loop and its executor threads exist, so they inherit the blocked signal.
+    survive_hangups()
     cfg = hypercorn.config.Config()
     cfg.bind = [f"0.0.0.0:{PORT}"]
     cfg.accesslog = "-"

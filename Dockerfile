@@ -25,8 +25,16 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 # no-new-privileges), so runtime `apt-get install` works without sudo — which
 # no_new_privs blocks anyway. IS_SANDBOX tells Claude Code that, so it allows
 # --dangerously-skip-permissions as uid 0.
+#
+# CLAUDE_CODE_SANDBOXED is the second half: it marks every directory as trusted, so the "Is this a
+# project you trust?" dialog never appears. Trust is recorded per absolute path in ~/.claude.json
+# and a trusted parent doesn't cover a child that is its own git repo, so without this every new
+# workspace -- each a fresh path and a fresh clone -- opens with that prompt. Every repo here was
+# cloned because the user asked the workbench for it, and --dangerously-skip-permissions is already
+# on, so there is nothing for the dialog to protect.
 ENV HOME=/root
 ENV IS_SANDBOX=1
+ENV CLAUDE_CODE_SANDBOXED=1
 ENV PATH="/app/.venv/bin:/root/.local/bin:$PATH"
 
 RUN curl -fsSL https://claude.ai/install.sh | bash
@@ -78,4 +86,10 @@ RUN date -u +%Y-%m-%dT%H:%M:%SZ > /app/.image-stamp
 
 WORKDIR /root
 EXPOSE 5000
-ENTRYPOINT ["/usr/bin/tini", "--", "/app/entrypoint.sh"]
+# SIGHUP is ignored before tini is exec'd, and SIG_IGN survives exec, so pid 1 inherits it.
+# This tini installs no SIGHUP handler of its own (its SigCgt is 0), so without this a `kill -HUP 1`
+# from anything inside the container kills pid 1 by default action and takes every terminal in
+# every workspace with it -- and this container runs Claude, the user's shells and its own test
+# suite by design. Tab processes put the default back before exec (see reset_child_signals), so
+# terminals can still be hung up normally.
+ENTRYPOINT ["/bin/sh", "-c", "trap '' HUP; exec /usr/bin/tini -- /app/entrypoint.sh"]

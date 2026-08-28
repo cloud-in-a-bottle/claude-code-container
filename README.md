@@ -6,7 +6,7 @@ You work in **projects** and **workspaces** — see [Projects and workspaces](#p
 
 ## What's inside the container
 
-- `@anthropic-ai/claude-code` (npm, installed at image build time). It runs in whichever workspace you opened it from. By default, `claude` is aliased with `--dangerously-skip-permissions` in this sandbox.
+- `@anthropic-ai/claude-code` (npm, installed at image build time). It runs in whichever workspace you opened it from. By default, `claude` is aliased with `--dangerously-skip-permissions` in this sandbox, and the folder-trust dialog is skipped so a new workspace opens straight into the conversation.
 - Python 3 + git + the usual tools.
 - A clone of `https://github.com/imbue-openhost/openhost` placed at `~/openhost` on first container start (override with `OPENHOST_REPO_URL` or `OPENHOST_DIR` env vars).
 - A Claude Code skill at `~/.claude/skills/openhost/` that points Claude at the curated docs in the local openhost clone.
@@ -134,9 +134,28 @@ Closing a panel kills the terminal behind it. If you close the browser instead (
 
 The frontend source is in `ui/`; see [Development](#development) for the build.
 
+### Pasting images
+
+Copy a screenshot, paste it into a terminal with the usual shortcut, and Claude gets the image.
+
+Claude Code can't do this by itself here. Its own image paste shells out to `xclip`/`wl-paste`, which read the clipboard of the machine the terminal is *on* — a container with no X server and, more to the point, not the machine holding your clipboard. That's what "no image in clipboard" means when you hit it in the browser.
+
+So the page does the transfer instead. The terminal pane watches for a `paste` carrying an image, uploads the bytes to `POST /api/pasted-images`, and pastes the path it gets back into the terminal as ordinary bracketed-paste text. Claude Code recognises a pasted path ending in `.png`/`.jpg`/`.gif`/`.webp` and reads it back into an attachment, so what you see is `[Image #1]` in the prompt.
+
+```
+POST /api/pasted-images   <raw image bytes>
+  -> { "path": "/…/.workbench/pasted-images/paste-20260828-205411-38dd89.png", "media_type": "image/png" }
+```
+
+The format comes off the file's magic bytes, not the content type the browser declared, because it's the extension Claude Code goes by. Anything that isn't one of the four formats is a 415, and the upload is capped at 25MB.
+
+Images land in `$HOME/.workbench/pasted-images/`, never in the workspace — pasting a screenshot shouldn't leave an untracked file in your repo — and anything older than a week is swept up on the next paste.
+
+A text paste is untouched: xterm's own handler still gets it.
+
 ### Colour schemes
 
-A picker in the top-right of the tab bar switches between **Dark** (the default), **Solarized Light** and **Solarized Dark**. It applies immediately — open terminals are recoloured in place, no reload — and is saved server-side in `$HOME/.workbench/ui.json`, so it persists across restarts and rebuilds and follows you to any browser.
+A picker in the top-right of the tab bar switches between **Solarized Light** (the default), **Solarized Dark** and **Dark**. It applies immediately — open terminals are recoloured in place, no reload — and is saved server-side in `$HOME/.workbench/ui.json`, so it persists across restarts and rebuilds and follows you to any browser.
 
 ```
 POST /api/ui/settings   { "theme": "solarized-light" }
@@ -144,7 +163,7 @@ POST /api/ui/settings   { "theme": "solarized-light" }
 
 A scheme is defined in two halves, because the terminal and the chrome are painted by different machinery:
 
-- `src/server/static/themes.css` — CSS variables selected by `data-theme` on `<html>`, covering the sidebar, dialogs, dockview's tab strip and the side panel. The bare `:root` block is the dark default, so an unknown or absent theme falls back to the original look. It's linked rather than bundled, because it has to apply before the app renders and the side panel's own page shares it.
+- `src/server/static/themes.css` — CSS variables selected by `data-theme` on `<html>`, covering the sidebar, dialogs, dockview's tab strip and the side panel. The bare `:root` block is the Solarized Light default, so an unknown or absent theme falls back to the default rather than to some other palette. It's linked rather than bundled, because it has to apply before the app renders and the side panel's own page shares it.
 - `ui/src/themes.js` — the terminal's 16-colour ANSI palette, which xterm.js needs as a JS object since it renders to a canvas.
 
 dockview's own chrome needs neither: `ui/src/styles/dockview.css` maps its CSS variables onto the same palette, so the layout follows the picker for free.
@@ -193,6 +212,20 @@ The container has 4 GB and one core, and the Claude sessions are the point of th
 - **The bundled Copilot is off** (`chat.disableAIFeatures`). It otherwise spawns a ~200 MB language server per instance, signed out and unasked.
 
 Roughly, measured in this container: ~200 MB idle, 400 MB–1 GB with a browser attached, ~5s to open, and ~2k inotify watches per instance out of a host-wide budget of ~62k that a container can't raise (hence the `files.watcherExclude` defaults). There's no project-wide index to go cold — search is ripgrep on demand — so a brand-new workspace opens as fast as an old one. Language servers are the exception: tsserver and friends rebuild per session regardless, while `rust-analyzer`'s and JDT's caches live in the workspace and are genuinely cold in a fresh clone, exactly as they would be for a fresh `git clone` in a terminal.
+
+### The panel is rendered with dockview's `always` renderer
+
+Not a detail to tidy away: dockview detaches a hidden panel's DOM by default, and
+re-attaching an `<iframe>` anywhere else in the document makes the browser reload
+it. With the default renderer, every switch between the terminal tab and the
+editor tab — and every drag into a split — silently restarted VS Code, losing the
+cursor, unsaved buffers and anything running in its terminal. For about five
+seconds afterwards hovers and other language features were simply dead, which is
+what it looked like from the outside.
+
+`renderer: 'always'` keeps the panel in one stable overlay container instead,
+which is what the option is for. Terminals don't need it; xterm re-measures
+itself when it comes back.
 
 ### How it's served
 

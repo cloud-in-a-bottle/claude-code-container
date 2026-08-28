@@ -22,6 +22,7 @@ from server.config import HOME
 from server.projects.workspaces import Workspace
 from server.projects.workspaces import parse_workspace_id
 from server.remote_services import get_anthropic_key
+from server.signals import reset_child_signals
 from server.tab_store import CLAUDE
 from server.tab_store import SHELL
 from server.tab_store import PersistedTab
@@ -132,6 +133,12 @@ class ServerTab:
     kick_event: asyncio.Event | None = None
 
 
+def _prepare_tab_process() -> None:
+    """Runs in the forked child before exec: its own session, and the signal defaults back."""
+    os.setsid()
+    reset_child_signals()
+
+
 def set_winsize(fd: int, rows: int, cols: int) -> None:
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
 
@@ -196,7 +203,10 @@ async def create_server_tab(
     master_fd, slave_fd = pty.openpty()
     set_winsize(master_fd, 24, 80)
 
-    merged_env = {**os.environ, "TERM": "xterm-256color", **(env or {})}
+    # xterm.js renders 24-bit SGR, but nothing in the pty advertises that, so TERM alone leaves
+    # apps at the 256-colour tier: Claude Code quantises its theme onto the xterm cube and its
+    # own /doctor asks for COLORTERM. Terminals we mirror (iTerm2, kitty, VS Code) all set it.
+    merged_env = {**os.environ, "TERM": "xterm-256color", "COLORTERM": "truecolor", **(env or {})}
     proc = subprocess.Popen(  # noqa: S603
         command,
         stdin=slave_fd,
@@ -204,7 +214,7 @@ async def create_server_tab(
         stderr=slave_fd,
         cwd=cwd,
         env=merged_env,
-        preexec_fn=os.setsid,
+        preexec_fn=_prepare_tab_process,
     )
     os.close(slave_fd)
 

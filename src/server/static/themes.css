@@ -1,43 +1,18 @@
 /* Chrome colours for the workbench UI, selected by the data-theme attribute on <html>.
  *
  * Shared by index.html and the side panel's home page, so both documents restyle together.
- * The bare :root block is the default dark theme: with no data-theme attribute, or an unknown
- * one, the UI looks exactly as it did before themes existed.
+ * The bare :root block is the default scheme, Solarized Light: it applies with no data-theme
+ * attribute, or an unknown one, so a document that hasn't been told the scheme yet still lands
+ * on the default rather than flashing some other palette.
+ *
+ * Solarized is Ethan Schoonover's palette. Both variants share one set of accent colours and
+ * differ only in which end of the base range is background and which is foreground.
  *
  * The terminal's own 16-colour palette is not here — xterm.js is canvas-rendered and takes its
- * colours as a JS object, so those live alongside these names in static/theme.js.
+ * colours as a JS object, so those live alongside these names in ui/src/themes.js.
  */
 
 :root {
-  color-scheme: dark;
-  --bg: #1e1e1e;
-  --fg: #ddd;
-  --chrome-bg: #111;
-  --border: #333;
-  --muted: #aaa;
-  --faint: #888;
-  --bright: #fff;
-  --hover-bg: #2a2a2a;
-  --menu-bg: #222;
-  --menu-border: #444;
-  --menu-desc: #777;
-  --input-bg: #1e1e1e;
-  --btn-bg: #2a2a2a;
-  --btn-border: #555;
-  --btn-fg: #ccc;
-  --danger: #f55;
-  --accent: #7fd1b9;
-  --status-clean: #6cc17a;
-  --status-dirty: #d9a441;
-  --status-conflict: #f55;
-  --overlay-bg: rgba(20, 20, 20, 0.92);
-  --overlay-fg: #bbb;
-}
-
-/* Solarized — Ethan Schoonover's palette. Both variants share one set of accent colours and
- * differ only in which end of the base range is background and which is foreground. */
-
-:root[data-theme="solarized-light"] {
   color-scheme: light;
   --bg: #fdf6e3;          /* base3  */
   --fg: #657b83;          /* base00 */
@@ -87,4 +62,32 @@
   --status-conflict: #dc322f;
   --overlay-bg: rgba(0, 43, 54, 0.92);
   --overlay-fg: #93a1a1;
+}
+
+/* The plain dark scheme the workbench shipped with before it had themes. */
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1e1e1e;
+  --fg: #ddd;
+  --chrome-bg: #111;
+  --border: #333;
+  --muted: #aaa;
+  --faint: #888;
+  --bright: #fff;
+  --hover-bg: #2a2a2a;
+  --menu-bg: #222;
+  --menu-border: #444;
+  --menu-desc: #777;
+  --input-bg: #1e1e1e;
+  --btn-bg: #2a2a2a;
+  --btn-border: #555;
+  --btn-fg: #ccc;
+  --danger: #f55;
+  --accent: #7fd1b9;
+  --status-clean: #6cc17a;
+  --status-dirty: #d9a441;
+  --status-conflict: #f55;
+  --overlay-bg: rgba(20, 20, 20, 0.92);
+  --overlay-fg: #bbb;
 }

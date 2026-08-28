@@ -79,15 +79,15 @@ def test_malformed_file_raises(settings_path: Path) -> None:
 def test_get_settings_reports_default() -> None:
     resp = _client().get("/api/ui/settings")
     assert resp.status_code == 200
-    assert resp.json() == {"side_panel": False, "theme": "dark"}
+    assert resp.json() == {"side_panel": False, "theme": "solarized-light"}
 
 
 def test_post_settings_persists(settings_path: Path) -> None:
     client = _client()
     resp = client.post("/api/ui/settings", json={"side_panel": True})
     assert resp.status_code == 200
-    assert resp.json() == {"side_panel": True, "theme": "dark"}
-    assert client.get("/api/ui/settings").json() == {"side_panel": True, "theme": "dark"}
+    assert resp.json() == {"side_panel": True, "theme": "solarized-light"}
+    assert client.get("/api/ui/settings").json() == {"side_panel": True, "theme": "solarized-light"}
     assert ui_settings.load_ui_settings() == UiSettings(side_panel=True)
 
 
@@ -100,13 +100,15 @@ def test_post_without_any_known_key_is_400() -> None:
 # ── themes ─────────────────────────────────────────────────────────────────────
 
 
-def test_theme_defaults_to_dark() -> None:
-    assert ui_settings.load_ui_settings().theme == ui_settings.DEFAULT_THEME
-
-
-def test_solarized_light_round_trips() -> None:
-    ui_settings.save_ui_settings(UiSettings(theme="solarized-light"))
+def test_theme_defaults_to_solarized_light() -> None:
+    assert ui_settings.DEFAULT_THEME == "solarized-light"
     assert ui_settings.load_ui_settings().theme == "solarized-light"
+
+
+def test_dark_round_trips() -> None:
+    """The non-default schemes have to survive a save; the default would pass either way."""
+    ui_settings.save_ui_settings(UiSettings(theme="dark"))
+    assert ui_settings.load_ui_settings().theme == "dark"
 
 
 def test_saving_unknown_theme_raises() -> None:
@@ -167,13 +169,13 @@ def test_theme_names_match_the_client() -> None:
 
 def test_index_carries_the_theme_for_a_flash_free_load() -> None:
     client = _client()
-    assert 'data-theme="dark"' in client.get("/").text
+    assert 'data-theme="solarized-light"' in client.get("/").text
 
-    client.post("/api/ui/settings", json={"theme": "solarized-light"})
+    client.post("/api/ui/settings", json={"theme": "dark"})
     body = client.get("/").text
-    assert 'data-theme="solarized-light"' in body
+    assert 'data-theme="dark"' in body
     # the client is told too, so it can populate the picker without a second round trip
-    assert '"theme": "solarized-light"' in body
+    assert '"theme": "dark"' in body
 
 
 # ── the toggle actually reaches the client ─────────────────────────────────────
