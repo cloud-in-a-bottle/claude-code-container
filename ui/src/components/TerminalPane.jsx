@@ -15,6 +15,16 @@ const RECONNECT_POLL_MS = 2000;
 // cols * 12 bytes per line held, so this is a few MB per terminal once one is really full.
 const SCROLLBACK_LINES = 10000;
 
+// iTerm2's text settings, as far as a browser can follow them: Monaco at 17, natural spacing.
+// Monaco is the one that matters -- it's on every Mac -- and the rest are for everyone else.
+// xterm stacks lines at exactly the font size, tighter than the ~12% of extra leading Monaco
+// itself asks for, so the line height puts that back.
+const TERMINAL_FONT = {
+  fontFamily: 'Monaco, Menlo, "DejaVu Sans Mono", "Liberation Mono", "Courier New", monospace',
+  fontSize: 17,
+  lineHeight: 1.12,
+};
+
 function wsUrl(tabId) {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   return `${proto}://${location.host}/terminal/ws?tab=${encodeURIComponent(tabId)}`;
@@ -188,8 +198,9 @@ export function TerminalPane(props) {
     const links = createLinkSupport(host, setLinkHint);
     onCleanup(links.dispose);
     term = new Terminal({
-      cursorBlink: true,
-      fontSize: 14,
+      ...TERMINAL_FONT,
+      cursorBlink: false,
+      cursorStyle: 'block',
       scrollback: SCROLLBACK_LINES,
       theme: xtermTheme(theme()),
       linkHandler: links.linkHandler,
