@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from server import claude_sessions
+from server import remote_services
 from server import tab_store
 from server import tabs
 from server import ui_settings
@@ -48,6 +49,9 @@ _STATE_PATHS: tuple[tuple[Any, str, str], ...] = (
     (tab_store, "TABS_PATH", ".workbench/tabs.json"),
     (ui_settings, "UI_SETTINGS_PATH", ".workbench/ui.json"),
     (claude_sessions, "CLAUDE_PROJECTS_DIR", ".claude/projects"),
+    (remote_services, "GH_HOSTS_PATH", ".config/gh/hosts.yml"),
+    (remote_services, "GH_MANAGED_MARKER", ".workbench/gh-auth-managed"),
+    (remote_services, "GIT_CONFIG_PATH", ".gitconfig"),
 )
 
 

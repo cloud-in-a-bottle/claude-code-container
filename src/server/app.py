@@ -12,6 +12,7 @@ from litestar.template.config import TemplateConfig
 from server.config import APP_DIR
 from server.config import PORT
 from server.projects.seed import seed_projects
+from server.remote_services import refresh_gh_auth_periodically
 from server.remote_services import seed_gh_auth
 from server.remote_services import seed_oh_config
 from server.routes.common import NO_CACHE
@@ -37,12 +38,14 @@ from server.tabs import restore_tabs
 
 async def _on_startup() -> None:
     await seed_oh_config()
-    await seed_gh_auth()
+    gh_refresh_delay = await seed_gh_auth()
     seed_projects()
     # Bring back the tabs from the previous run before any client connects, so the first page
     # load already shows them instead of racing to create a fresh one.
     await restore_tabs()
     asyncio.create_task(persist_tabs_periodically())  # noqa: RUF006
+    # gh's token is short-lived, so keep re-minting it for as long as the workbench runs.
+    asyncio.create_task(refresh_gh_auth_periodically(gh_refresh_delay))  # noqa: RUF006
 
 
 app = Litestar(
