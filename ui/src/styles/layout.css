@@ -63,8 +63,9 @@ body { display: flex; flex-direction: row; }
 .terminal-panel { position: relative; width: 100%; height: 100%; padding: 4px; box-sizing: border-box; }
 .terminal-panel > .term { width: 100%; height: 100%; }
 
-/* iTerm2 thins its strokes on retina; the browser's default subpixel antialiasing renders the
- * same font noticeably heavier, so ask for grayscale antialiasing to match. */
+/* iTerm2 thins its strokes on retina. macOS fattens glyph stems as it rasterizes them, which is
+ * what the browser asks for by default and what makes the same font look heavier here; this opts
+ * out of that, the way iTerm2's setting does. */
 .term .xterm { -webkit-font-smoothing: antialiased; }
 
 /* xterm turns the cursor to a hand the moment a link is under it, but here a plain click just

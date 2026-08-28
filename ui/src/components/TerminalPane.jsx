@@ -17,12 +17,11 @@ const SCROLLBACK_LINES = 10000;
 
 // iTerm2's text settings, as far as a browser can follow them: Monaco at 17, natural spacing.
 // Monaco is the one that matters -- it's on every Mac -- and the rest are for everyone else.
-// xterm stacks lines at exactly the font size, tighter than the ~12% of extra leading Monaco
-// itself asks for, so the line height puts that back.
+// No lineHeight: xterm sizes a cell from the font's own ascent plus descent, not from the font
+// size, so its default of 1 is already iTerm2's vertical spacing of 100%.
 const TERMINAL_FONT = {
   fontFamily: 'Monaco, Menlo, "DejaVu Sans Mono", "Liberation Mono", "Courier New", monospace',
   fontSize: 17,
-  lineHeight: 1.12,
 };
 
 function wsUrl(tabId) {
