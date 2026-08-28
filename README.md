@@ -135,7 +135,7 @@ The frontend source is in `ui/`; see [Development](#development) for the build.
 
 ### Colour schemes
 
-A picker in the top-right of the tab bar switches between **Dark** (the default), **Solarized Light** and **Solarized Dark**. It applies immediately — open terminals are recoloured in place, no reload — and is saved server-side in `$HOME/.workbench/ui.json`, so it persists across restarts and rebuilds and follows you to any browser.
+A picker in the top-right of the tab bar switches between **Solarized Light** (the default), **Solarized Dark** and **Dark**. It applies immediately — open terminals are recoloured in place, no reload — and is saved server-side in `$HOME/.workbench/ui.json`, so it persists across restarts and rebuilds and follows you to any browser.
 
 ```
 POST /api/ui/settings   { "theme": "solarized-light" }
@@ -143,7 +143,7 @@ POST /api/ui/settings   { "theme": "solarized-light" }
 
 A scheme is defined in two halves, because the terminal and the chrome are painted by different machinery:
 
-- `src/server/static/themes.css` — CSS variables selected by `data-theme` on `<html>`, covering the sidebar, dialogs, dockview's tab strip and the side panel. The bare `:root` block is the dark default, so an unknown or absent theme falls back to the original look. It's linked rather than bundled, because it has to apply before the app renders and the side panel's own page shares it.
+- `src/server/static/themes.css` — CSS variables selected by `data-theme` on `<html>`, covering the sidebar, dialogs, dockview's tab strip and the side panel. The bare `:root` block is the Solarized Light default, so an unknown or absent theme falls back to the default rather than to some other palette. It's linked rather than bundled, because it has to apply before the app renders and the side panel's own page shares it.
 - `ui/src/themes.js` — the terminal's 16-colour ANSI palette, which xterm.js needs as a JS object since it renders to a canvas.
 
 dockview's own chrome needs neither: `ui/src/styles/dockview.css` maps its CSS variables onto the same palette, so the layout follows the picker for free.
