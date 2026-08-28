@@ -9,6 +9,10 @@ import { forgetTab, state, theme } from '../store';
 import { xtermTheme } from '../themes';
 
 const RECONNECT_POLL_MS = 2000;
+// xterm keeps 1000 lines by default, which a long claude session scrolls past in minutes — the
+// scrollbar then stops well short of where the conversation actually started. Costs roughly
+// cols * 12 bytes per line held, so this is a few MB per terminal once one is really full.
+const SCROLLBACK_LINES = 10000;
 
 function wsUrl(tabId) {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -179,7 +183,12 @@ export function TerminalPane(props) {
   }
 
   onMount(() => {
-    term = new Terminal({ cursorBlink: true, fontSize: 14, theme: xtermTheme(theme()) });
+    term = new Terminal({
+      cursorBlink: true,
+      fontSize: 14,
+      scrollback: SCROLLBACK_LINES,
+      theme: xtermTheme(theme()),
+    });
     fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host);
