@@ -3,7 +3,7 @@
 .venv
 # Patterns without `**` only match at the top level, so the nested ones matter: ui/node_modules is
 # built on the host (macOS binaries) and would otherwise be copied over the Linux tree that the
-# frontend build stage installs.
+# image's own `npm ci` layer installs.
 **/node_modules
 **/__pycache__
 **/*.pyc
