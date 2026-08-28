@@ -63,6 +63,11 @@ body { display: flex; flex-direction: row; }
 .terminal-panel { position: relative; width: 100%; height: 100%; padding: 4px; box-sizing: border-box; }
 .terminal-panel > .term { width: 100%; height: 100%; }
 
+/* xterm turns the cursor to a hand the moment a link is under it, but here a plain click just
+ * places the cursor -- only promise a click once the modifier that follows links is actually down. */
+.term:not(.link-modifier) .xterm.xterm-cursor-pointer,
+.term:not(.link-modifier) .xterm .xterm-cursor-pointer { cursor: text; }
+
 .term-notice {
   position: absolute;
   right: 14px;
@@ -75,6 +80,11 @@ body { display: flex; flex-direction: row; }
   font-size: 12px;
   pointer-events: none;
   z-index: 9;
+  /* A link hint carries a whole URL, which must not run off the side of the panel. */
+  max-width: calc(100% - 28px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .busy-overlay {
