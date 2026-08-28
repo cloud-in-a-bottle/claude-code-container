@@ -193,6 +193,20 @@ The container has 4 GB and one core, and the Claude sessions are the point of th
 
 Roughly, measured in this container: ~200 MB idle, 400 MB–1 GB with a browser attached, ~5s to open, and ~2k inotify watches per instance out of a host-wide budget of ~62k that a container can't raise (hence the `files.watcherExclude` defaults). There's no project-wide index to go cold — search is ripgrep on demand — so a brand-new workspace opens as fast as an old one. Language servers are the exception: tsserver and friends rebuild per session regardless, while `rust-analyzer`'s and JDT's caches live in the workspace and are genuinely cold in a fresh clone, exactly as they would be for a fresh `git clone` in a terminal.
 
+### The panel is rendered with dockview's `always` renderer
+
+Not a detail to tidy away: dockview detaches a hidden panel's DOM by default, and
+re-attaching an `<iframe>` anywhere else in the document makes the browser reload
+it. With the default renderer, every switch between the terminal tab and the
+editor tab — and every drag into a split — silently restarted VS Code, losing the
+cursor, unsaved buffers and anything running in its terminal. For about five
+seconds afterwards hovers and other language features were simply dead, which is
+what it looked like from the outside.
+
+`renderer: 'always'` keeps the panel in one stable overlay container instead,
+which is what the option is for. Terminals don't need it; xterm re-measures
+itself when it comes back.
+
 ### How it's served
 
 code-server listens on a unix socket with `--auth none`, and the workbench proxies it at `/vscode/<project>/<workspace>/` on its own origin, so the only way in is through the openhost router's authentication. There is no port to reach it on, and `--disable-proxy` keeps code-server from opening one onto the rest of the container.
