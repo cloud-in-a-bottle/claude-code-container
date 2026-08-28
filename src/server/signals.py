@@ -32,6 +32,11 @@ def survive_hangups() -> None:
         signal.signal(HANGUP, signal.SIG_IGN)
         return
 
+    # Deliberately not SIG_IGN, even though the entrypoint sets that for pid 1 and we inherit it:
+    # the kernel discards an ignored signal instead of queueing it, so the watcher below would
+    # never have anything to report. The mask is what makes this survivable -- it is set here and
+    # never lifted -- and a blocked signal never reaches its disposition.
+    signal.signal(HANGUP, signal.SIG_DFL)
     signal.pthread_sigmask(signal.SIG_BLOCK, {HANGUP})
 
     def watch() -> None:

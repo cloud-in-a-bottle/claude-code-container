@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import signal
+import sys
 import time
 from collections.abc import Generator
 from pathlib import Path
@@ -237,3 +239,15 @@ def test_tabs_can_still_be_hung_up_after_the_server_makes_itself_immune(workbenc
             return
         time.sleep(0.05)
     raise AssertionError("the tab ignored SIGHUP: the child inherited the server's signal mask")
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="sigwaitinfo, and so the diagnostic, is Linux-only")
+def test_the_server_keeps_hangups_pending_so_it_can_report_the_sender() -> None:
+    """Blocked, and left on SIG_DFL on purpose.
+
+    An ignored signal is discarded by the kernel rather than queued, which would silently cost us
+    the one diagnostic that can name whatever is sending these.
+    """
+    survive_hangups()
+    assert signal.SIGHUP in signal.pthread_sigmask(signal.SIG_BLOCK, set())
+    assert signal.getsignal(signal.SIGHUP) is signal.SIG_DFL
