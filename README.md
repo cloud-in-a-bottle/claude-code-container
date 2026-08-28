@@ -229,6 +229,9 @@ Closing a panel kills the terminal behind it. If you close the browser instead
 (or a restart brings terminals back), **+ terminal** in the top bar lists any
 that are running without a panel so you can reattach.
 
+**+ editor** opens a VS Code panel for the workspace in the same layout — see
+[The editor](#the-editor-vs-code-in-a-panel).
+
 The frontend source is in `ui/`; see [Development](#development) for the build.
 
 ### Colour schemes
@@ -290,6 +293,84 @@ browser in `localStorage`; the on/off setting above is server-side.
 
 The setting reaches the page as `window.__WORKBENCH__.side_panel`, so the panel
 is only mounted when it's on. It takes effect on the next page load.
+
+## The editor (VS Code in a panel)
+
+Every workspace can open a full VS Code beside its terminals — **+ editor** in the
+top bar, or drag it into a split like any other panel. It's
+[code-server](https://github.com/coder/code-server), running against that
+workspace's directory, and it belongs to the workspace: switching workspaces
+swaps it out, and the arrangement is remembered along with the terminals.
+
+Instances are **per workspace and separate**, so two workspaces of the same
+project can't disturb each other's editor state. What they *share* is the
+configuration you'd expect to set once:
+
+```
+~/.workbench/vscode/user/settings.json       shared: settings, keybindings, snippets
+~/.workbench/vscode/extensions/              shared: installed extensions
+~/.workbench/vscode/instances/<digest>/      per workspace: layout, open editors, per-extension state
+```
+
+The shared files are symlinked into each instance's user-data-dir. VS Code
+resolves the link before it writes, so changing a setting *from inside the
+editor* lands in the shared file and reaches every other workspace — which is
+the point. The per-workspace directories are separate because sharing one makes
+concurrent instances collide over `workspaceStorage`.
+
+Extensions come from [Open VSX](https://open-vsx.org/) rather than Microsoft's
+marketplace, which is a licensing constraint of every non-Microsoft VS Code
+build, not a choice here. Most things are there (including
+`Anthropic.claude-code`); Microsoft-licensed ones like Pylance are not.
+
+The colour scheme follows the workbench's own picker, live and with no reload.
+
+### What it costs, and what stops it costing that
+
+The container has 4 GB and one core, and the Claude sessions are the point of
+the workbench, so the editor is deliberately kept on a short leash:
+
+- **At most two instances run at once.** Opening a third stops the one you
+  used least recently. Its work is on disk in the workspace, and reopening it
+  takes about five seconds.
+- **Closing the panel stops the instance**, and an instance nobody is attached
+  to shuts itself down after 30 minutes (`--idle-timeout-seconds`). Without
+  that, VS Code holds its extension host for *three hours* after a disconnect.
+- **The bundled Copilot is off** (`chat.disableAIFeatures`). It otherwise
+  spawns a ~200 MB language server per instance, signed out and unasked.
+
+Roughly, measured in this container: ~200 MB idle, 400 MB–1 GB with a browser
+attached, ~5s to open, and ~2k inotify watches per instance out of a host-wide
+budget of ~62k that a container can't raise (hence the `files.watcherExclude`
+defaults). There's no project-wide index to go cold — search is ripgrep on
+demand — so a brand-new workspace opens as fast as an old one. Language servers
+are the exception: tsserver and friends rebuild per session regardless, while
+`rust-analyzer`'s and JDT's caches live in the workspace and are genuinely cold
+in a fresh clone, exactly as they would be for a fresh `git clone` in a
+terminal.
+
+### How it's served
+
+code-server listens on a unix socket with `--auth none`, and the workbench
+proxies it at `/vscode/<project>/<workspace>/` on its own origin, so the only
+way in is through the openhost router's authentication. There is no port to
+reach it on, and `--disable-proxy` keeps code-server from opening one onto the
+rest of the container.
+
+```
+GET    /api/editor                            what's running, and whether it's installed yet
+POST   /api/editor        {workspace_id}      start one (the first call downloads code-server)
+DELETE /api/editor/{project}/{workspace}      stop one
+```
+
+code-server itself (~740 MB unpacked) is fetched on first use into
+`~/.workbench/vscode/install/` rather than baked into the image, so it survives
+rebuilds and costs nothing until someone opens an editor. First ever open takes
+about 8 seconds including the download.
+
+`code somefile.py` works in the editor's *own* integrated terminal, which knows
+how to reach the window it's running in. It does not work from the workbench's
+terminals: that needs a per-window socket the workbench can't know the name of.
 
 ## The `open-workspace` service
 

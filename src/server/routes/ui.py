@@ -5,6 +5,7 @@ from litestar import Response
 from litestar import get
 from litestar import post
 
+from server.editor.settings import apply_theme
 from server.routes.common import JsonDict
 from server.routes.common import error
 from server.routes.common import json_body
@@ -41,4 +42,7 @@ async def update_ui_settings(request: Request[Any, Any, Any]) -> Response[JsonDi
 
     settings = UiSettings(side_panel=bool(data.get("side_panel", current.side_panel)), theme=theme)
     save_ui_settings(settings)
+    # The editor reads its theme from the shared settings file, which running instances watch, so
+    # this recolours any open editor panel without a reload.
+    apply_theme(settings.theme)
     return Response(content=_settings_json(settings))

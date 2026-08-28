@@ -9,6 +9,7 @@ dependencies = [
     "httpx==0.28.1",
     "tomli-w==1.2.0",
     "litestar[jinja]>=2.24.0",
+    "websockets>=17.0.1",
 ]
 
 [dependency-groups]

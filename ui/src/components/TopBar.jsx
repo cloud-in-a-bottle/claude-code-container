@@ -2,7 +2,7 @@ import { Show, createSignal } from 'solid-js';
 
 import * as api from '../api';
 import { hidden as panelHidden, setHidden as setPanelHidden, sidePanelEnabled } from '../sidePanel';
-import { activeWorkspace, adoptTab, newTab, sidebarHidden, state, toggleSidebar } from '../store';
+import { activeWorkspace, adoptTab, newTab, requestEditor, sidebarHidden, state, toggleSidebar } from '../store';
 import { Menu } from './Menu';
 import { ThemePicker } from './ThemePicker';
 
@@ -49,6 +49,9 @@ export function TopBar() {
       <Show when={state.activeWorkspaceId}>
         <button id="new-terminal" type="button" title="New terminal" onClick={(e) => openTerminalMenu(e.currentTarget)}>
           + terminal
+        </button>
+        <button class="bar-btn" type="button" title="Open this workspace in VS Code" onClick={requestEditor}>
+          + editor
         </button>
       </Show>
       <div id="topbar-actions">

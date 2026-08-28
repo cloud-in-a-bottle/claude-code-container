@@ -32,3 +32,8 @@ export const deleteTab = (tabId) => request('DELETE', `/api/tabs/${encodeURIComp
 export const kickTab = (tabId) => request('POST', `/api/tabs/${encodeURIComponent(tabId)}/kick`);
 
 export const saveUiSettings = (patch) => request('POST', '/api/ui/settings', patch);
+
+export const listEditors = () => request('GET', '/api/editor');
+export const startEditor = (workspaceId) => request('POST', '/api/editor', { workspace_id: workspaceId });
+export const stopEditor = (workspaceId) =>
+  request('DELETE', `/api/editor/${workspaceId.split('/').map(encodeURIComponent).join('/')}`);
