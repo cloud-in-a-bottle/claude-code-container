@@ -1,6 +1,6 @@
 import { DockviewSolid } from '@arminmajerie/dockview-solid';
 import '@arminmajerie/dockview-solid/styles/dockview.css';
-import { Show, createEffect, onCleanup } from 'solid-js';
+import { Show, createEffect, onCleanup, untrack } from 'solid-js';
 
 import { closeTab, newTab, state, takeFocusTab } from '../store';
 import { TerminalPane } from './TerminalPane';
@@ -91,8 +91,9 @@ export function TerminalLayout() {
       addPanel(tab, placement);
     }
 
-    // A deep link (?tab=) or a reattached terminal asks to be brought to the front.
-    const focusId = takeFocusTab();
+    // A deep link (?tab=) or a reattached terminal asks to be brought to the front. Untracked:
+    // taking it clears it, and this effect has no business re-running over that.
+    const focusId = untrack(takeFocusTab);
     if (focusId) dock.getPanel(focusId)?.api.setActive();
   }
 
