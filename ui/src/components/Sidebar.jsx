@@ -4,6 +4,7 @@ import { deleteProject, deleteWorkspace, openWorkspace, state, toggleSidebar } f
 import { ConfirmDialog } from './ConfirmDialog';
 import { ProjectDialog } from './ProjectDialog';
 import { WorkspaceDialog } from './WorkspaceDialog';
+import { WorkspaceStatusDot, WorkspaceSync } from './WorkspaceStatus';
 
 const COLLAPSED_KEY = 'workbench.collapsedProjects';
 
@@ -88,10 +89,13 @@ export function Sidebar() {
                           <div
                             class="workspace-row"
                             classList={{ active: workspace.id === state.activeWorkspaceId }}
-                            title={workspace.path}
                             onClick={() => openWorkspace(workspace.id)}
                           >
+                            {/* The dot carries the path and the rest of the git status in its
+                                hover card, which is why the row has no title of its own. */}
+                            <WorkspaceStatusDot workspace={workspace} />
                             <span class="workspace-name">{workspace.name}</span>
+                            <WorkspaceSync workspace={workspace} />
                             <button
                               class="row-btn danger"
                               type="button"

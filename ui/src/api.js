@@ -34,6 +34,9 @@ export const createWorkspace = (projectId, name, ref) =>
 export const deleteWorkspace = (workspaceId) =>
   request('DELETE', `/api/workspaces/${workspaceId.split('/').map(encodeURIComponent).join('/')}`);
 
+/** Git status for every workspace in one call — see the sidebar's status dots. */
+export const listWorkspaceStatus = () => request('GET', '/api/workspaces/status');
+
 export const listTabs = (workspaceId) =>
   request('GET', `/api/tabs?workspace=${encodeURIComponent(workspaceId)}`);
 export const createTab = (workspaceId, label) => request('POST', '/api/tabs', { workspace_id: workspaceId, label });

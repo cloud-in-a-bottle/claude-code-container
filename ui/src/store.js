@@ -9,6 +9,10 @@ const bootstrap = window.__WORKBENCH__ || {};
 const LAST_WORKSPACE_KEY = 'workbench.workspace';
 const SIDEBAR_HIDDEN_KEY = 'workbench.sidebarHidden';
 
+/** How often the sidebar re-reads git status. Unhurried on purpose: the server coalesces bursts,
+ *  but this is still `git` on a one-core container shared with the Claude sessions. */
+const STATUS_POLL_MS = 10000;
+
 const [state, setState] = createStore({
   projects: [],
   /** Terminals of the active workspace only — switching workspaces replaces this wholesale.
@@ -17,6 +21,9 @@ const [state, setState] = createStore({
   activeWorkspaceId: '',
   /** A terminal the layout should bring to the front once its panel exists. Cleared when used. */
   focusTabId: '',
+  /** Git status of every workspace, keyed by workspace id — what the sidebar's dots read. Filled
+   *  by a poll, so a workspace is missing from it until the first one lands. */
+  status: {},
   ready: false,
 });
 
@@ -67,6 +74,33 @@ export function takeFocusTab() {
 
 export async function refreshProjects() {
   setState('projects', await api.listProjects());
+}
+
+export async function refreshStatus() {
+  const statuses = await api.listWorkspaceStatus();
+  setState('status', Object.fromEntries(statuses.map((s) => [s.workspace_id, s])));
+}
+
+export function workspaceStatus(workspaceId) {
+  return state.status[workspaceId];
+}
+
+/** Ask for fresh statuses without waiting on them: a failed refresh only means the dots stay as
+ *  they are until the next poll, which is not worth interrupting anyone over. */
+function refreshStatusSoon() {
+  refreshStatus().catch(() => {});
+}
+
+/** Keep the status dots current, and only while the page is actually being looked at. A failed
+ *  poll leaves the last statuses on screen rather than blanking them; the next tick tries again. */
+function watchStatus() {
+  const tick = () => {
+    if (document.visibilityState === 'visible') refreshStatusSoon();
+  };
+  setInterval(tick, STATUS_POLL_MS);
+  // A tab left in the background misses ticks, so catch up the moment it comes back.
+  document.addEventListener('visibilitychange', tick);
+  tick();
 }
 
 function rememberWorkspace(workspaceId) {
@@ -146,6 +180,7 @@ export async function deleteProject(projectId) {
 export async function createWorkspace(projectId, name, ref) {
   const workspace = await api.createWorkspace(projectId, name, ref);
   await refreshProjects();
+  refreshStatusSoon();
   // Creating it already opened its first terminal; adopt that rather than asking for another.
   ++switchToken;
   batch(() => {
@@ -168,6 +203,7 @@ export async function deleteWorkspace(workspaceId) {
   }
   localStorage.removeItem(`workbench.layout.${workspaceId}`);
   await refreshProjects();
+  refreshStatusSoon();
 }
 
 export async function init() {
@@ -183,4 +219,5 @@ export async function init() {
     if (wantedTab && state.tabs.some((t) => t.id === wantedTab)) setState('focusTabId', wantedTab);
   }
   setState('ready', true);
+  watchStatus();
 }

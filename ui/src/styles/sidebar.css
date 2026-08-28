@@ -89,7 +89,7 @@ body.sidebar-hidden #sidebar-toggle { display: flex; }
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 3px 6px 3px 26px;
+  padding: 3px 6px 3px 12px;
   cursor: pointer;
   color: var(--muted);
 }

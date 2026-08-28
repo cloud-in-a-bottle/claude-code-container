@@ -31,6 +31,9 @@
   --btn-fg: #586e75;      /* base01 */
   --danger: #dc322f;
   --accent: #268bd2;
+  --status-clean: #859900;
+  --status-dirty: #b58900;
+  --status-conflict: #dc322f;
   --overlay-bg: rgba(253, 246, 227, 0.92);
   --overlay-fg: #586e75;
 }
@@ -54,6 +57,9 @@
   --btn-fg: #93a1a1;
   --danger: #dc322f;
   --accent: #2aa198;
+  --status-clean: #859900;
+  --status-dirty: #b58900;
+  --status-conflict: #dc322f;
   --overlay-bg: rgba(0, 43, 54, 0.92);
   --overlay-fg: #93a1a1;
 }
@@ -79,6 +85,9 @@
   --btn-fg: #ccc;
   --danger: #f55;
   --accent: #7fd1b9;
+  --status-clean: #6cc17a;
+  --status-dirty: #d9a441;
+  --status-conflict: #f55;
   --overlay-bg: rgba(20, 20, 20, 0.92);
   --overlay-fg: #bbb;
 }

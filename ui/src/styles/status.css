@@ -1,0 +1,74 @@
+/* Git status of a workspace: the dot at the head of its sidebar row, and the card that hovering
+ * the dot opens. Colours come from themes.css. */
+
+.ws-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 14px;
+  align-self: stretch;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-sizing: border-box;
+  background: var(--faint);
+}
+.status-dot.state-clean { background: var(--status-clean); }
+.status-dot.state-dirty { background: var(--status-dirty); }
+.status-dot.state-conflicted { background: var(--status-conflict); }
+/* Hollow, so "nothing known yet" and "couldn't be read" can never be mistaken for "clean". */
+.status-dot.state-unknown { background: none; border: 1px solid var(--faint); }
+.status-dot.state-unavailable { background: none; border: 1px solid var(--status-conflict); }
+.status-dot.state-cloning {
+  background: none;
+  border: 1px solid var(--accent);
+  animation: ws-pulse 1.4s ease-in-out infinite;
+}
+@keyframes ws-pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+/* Ahead/behind lives in the row itself, and steps aside when the row's buttons appear. */
+.ws-sync { display: inline-flex; gap: 3px; font-size: 10px; color: var(--faint); }
+.workspace-row:hover .ws-sync { display: none; }
+
+.ws-card {
+  position: fixed;
+  z-index: 1000;
+  min-width: 190px;
+  max-width: 320px;
+  padding: 8px 10px;
+  background: var(--menu-bg);
+  border: 1px solid var(--menu-border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.5;
+  /* The card sits next to the dot that opened it; without this it could take the hover it needs. */
+  pointer-events: none;
+}
+.ws-card-head { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+.ws-card-title { color: var(--bright); font-weight: 600; }
+.ws-card-row { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-card-path {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--menu-border);
+  color: var(--menu-desc);
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.ws-dim { color: var(--menu-desc); }
+.ws-branch { color: var(--accent); }
+.ws-subject { white-space: normal; color: var(--muted); }
+.ws-sha { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--faint); }
+.ws-add { color: var(--status-clean); }
+.ws-del { color: var(--status-conflict); }
+.ws-ahead { color: var(--accent); }
+.ws-behind { color: var(--status-dirty); }
