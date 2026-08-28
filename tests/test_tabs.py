@@ -11,12 +11,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from server import claude_sessions
 from server import tab_store
 from server import tabs as tabs_module
 from server.projects import workspaces
 from server.projects.workspaces import Workspace
 from server.tabs import ServerTab
 from server.tabs import _tabs
+
+_EXISTING_SESSION = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
 
 @pytest.fixture(autouse=True)
@@ -166,3 +169,40 @@ def test_kill_tab_ends_the_shells_children_too(workbench_home: Path) -> None:
             return
         time.sleep(0.05)
     raise AssertionError("the tab's process group outlived kill_tab")
+
+
+def test_a_workspace_with_a_conversation_on_disk_rejoins_it(
+    workbench_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The tab list is the fragile half of the state; the transcript is the valuable half.
+
+    Losing the first without the second is the ordinary case (the list only records tabs that were
+    live at the last write), and minting a fresh id there strands a real conversation on disk.
+    """
+    workspace = Workspace(project_id="proj", name="ws")
+    workspaces.create_workspace_dir(workspace)
+    transcripts = claude_sessions.transcript_dir(workspace.path)
+    transcripts.mkdir(parents=True)
+    (transcripts / f"{_EXISTING_SESSION}.jsonl").write_text("{}\n")
+    created = _stub_tab_creation(monkeypatch)
+
+    asyncio.run(tabs_module.new_tab_in_workspace(workspace))
+
+    assert created[0]["session_id"] == _EXISTING_SESSION
+    # Resume leads, so rejoining an existing conversation doesn't print an error first.
+    command = created[0]["command"][-1]
+    assert command.index("--resume") < command.index("--session-id")
+
+
+def test_a_workspace_with_no_conversation_starts_a_fresh_one(
+    workbench_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = Workspace(project_id="proj", name="ws")
+    workspaces.create_workspace_dir(workspace)
+    created = _stub_tab_creation(monkeypatch)
+
+    asyncio.run(tabs_module.new_tab_in_workspace(workspace))
+
+    assert created[0]["session_id"] not in ("", _EXISTING_SESSION)
+    command = created[0]["command"][-1]
+    assert command.index("--session-id") < command.index("--resume")
