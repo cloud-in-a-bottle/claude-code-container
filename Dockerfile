@@ -49,11 +49,13 @@ RUN cp /app/workbench.sh /etc/profile.d/workbench.sh \
     && echo '[ -r /etc/profile.d/workbench.sh ] && . /etc/profile.d/workbench.sh' >> /etc/bash.bashrc
 
 # The parts of the repo that rarely move: the entrypoint, the manifest, the docs the workbench
-# points Claude at, and the bundled skills.
+# points Claude at, the bundled skills, and the global instructions the entrypoint symlinks to
+# ~/.claude/CLAUDE.md.
 COPY entrypoint.sh openhost.toml justfile README.md claude.md style_guide.md ./
 COPY .dockerignore .gitignore .pre-commit-config.yaml Dockerfile ./
 COPY services/ ./services/
 COPY skills/ ./skills/
+COPY claude-home/ ./claude-home/
 RUN chmod +x /app/entrypoint.sh
 
 # The app. `uv sync` installs the project editable, so it points at /app/src rather than copying

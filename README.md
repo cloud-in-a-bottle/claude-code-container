@@ -19,6 +19,12 @@ the whole UI.
   or `OPENHOST_DIR` env vars).
 - A Claude Code skill at `~/.claude/skills/openhost/` that points Claude
   at the curated docs in the local openhost clone.
+- Global Claude instructions at `~/.claude/CLAUDE.md`, which Claude reads in
+  every workspace. It's a symlink to `claude-home/CLAUDE.md` in this repo, so
+  app updates ship new text automatically. Your own additions go in
+  `~/.claude/CLAUDE.local.md`, which the bundled file imports and the entrypoint
+  never overwrites (an existing `~/.claude/CLAUDE.md` is moved there on first
+  start rather than replaced).
 - A checkout of this repo at `~/claude-code-container`, so you can work on
   the workbench from inside the workbench (override with `WORKBENCH_REPO_URL`
   or `WORKBENCH_DIR`). See the warning below before editing it.
@@ -318,8 +324,9 @@ dependency and `uv add --group dev <pkg>` for a dev-only one.
 
 The backend lives in `src/server/`: `routes/` holds the HTTP handlers, `projects/`
 the project/workspace model and the `create_workspace.sh` it launches, and
-`tabs.py` the PTY plumbing. `entrypoint.sh`, `workbench.sh` and `skills/` sit at
-the repo root because the container refers to them by absolute path.
+`tabs.py` the PTY plumbing. `entrypoint.sh`, `workbench.sh`, `skills/` and
+`claude-home/` sit at the repo root because the container refers to them by
+absolute path.
 
 The frontend is a Solid app in `ui/`, built by vite into
 `src/server/static/ui/bundle.{js,css}` — fixed names, since the page is a Jinja
