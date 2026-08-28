@@ -11,6 +11,7 @@ import struct
 import subprocess
 import termios
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +30,11 @@ from server.tab_store import PersistedTab
 from server.tab_store import load_tabs
 from server.tab_store import save_tabs
 
-_BUF_MAX = 100 * 1024  # 100 KB ring buffer per tab
+# Ring buffer per tab, replayed to a browser that (re)attaches. This is raw pty output, and claude
+# spends most of its bytes redrawing its input box in place, so a byte here buys far less scrollback
+# than a byte of plain shell output would: 100 KB was only a few hundred lines of a claude session.
+_BUF_MAX = 2 * 1024 * 1024
+_REPLAY_CHUNK = 64 * 1024
 _KICKED_MSG = b"\x01" + json.dumps({"type": "kicked"}).encode()
 
 _tabs: dict[str, ServerTab] = {}
@@ -143,6 +148,19 @@ def set_winsize(fd: int, rows: int, cols: int) -> None:
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
 
 
+def record_output(buf: bytearray, data: bytes) -> None:
+    """Add pty output to a tab's replay buffer, dropping the oldest bytes once it is over _BUF_MAX."""
+    buf.extend(data)
+    if len(buf) > _BUF_MAX:
+        del buf[: len(buf) - _BUF_MAX]
+
+
+def replay_frames(buf: bytes) -> Iterator[bytes]:
+    """Cut a replay buffer into websocket frames small enough to cross any proxy on the way out."""
+    for start in range(0, len(buf), _REPLAY_CHUNK):
+        yield buf[start : start + _REPLAY_CHUNK]
+
+
 async def tab_reader(tab: ServerTab) -> None:
     """Background task: drain master_fd into the ring buffer and the client queue."""
     loop = asyncio.get_event_loop()
@@ -167,9 +185,7 @@ async def tab_reader(tab: ServerTab) -> None:
                 except asyncio.QueueFull:
                     pass
             return
-        tab.output_buf.extend(data)
-        if len(tab.output_buf) > _BUF_MAX:
-            del tab.output_buf[: len(tab.output_buf) - _BUF_MAX]
+        record_output(tab.output_buf, data)
         if tab.client_queue is not None:
             try:
                 tab.client_queue.put_nowait(data)
@@ -203,10 +219,22 @@ async def create_server_tab(
     master_fd, slave_fd = pty.openpty()
     set_winsize(master_fd, 24, 80)
 
-    # xterm.js renders 24-bit SGR, but nothing in the pty advertises that, so TERM alone leaves
-    # apps at the 256-colour tier: Claude Code quantises its theme onto the xterm cube and its
-    # own /doctor asks for COLORTERM. Terminals we mirror (iTerm2, kitty, VS Code) all set it.
-    merged_env = {**os.environ, "TERM": "xterm-256color", "COLORTERM": "truecolor", **(env or {})}
+    merged_env = {
+        **os.environ,
+        # xterm.js renders 24-bit SGR, but nothing in the pty advertises that, so TERM alone leaves
+        # apps at the 256-colour tier: Claude Code quantises its theme onto the xterm cube and its
+        # own /doctor asks for COLORTERM. Terminals we mirror (iTerm2, kitty, VS Code) all set it.
+        "TERM": "xterm-256color",
+        "COLORTERM": "truecolor",
+        # Claude's fullscreen renderer draws into the terminal's alternate screen and keeps its own
+        # virtualised scrollback in there, which the browser's scrollbar can't reach -- so a
+        # fullscreen session looks like a terminal you can't scroll. Claude otherwise picks a
+        # renderer per session (rollout gates, an upsell dialog), so without this some tabs
+        # scrolled and some didn't. Set on every tab, not just Claude ones: a shell tab is a place
+        # someone runs `claude` by hand.
+        "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN": "1",
+        **(env or {}),
+    }
     proc = subprocess.Popen(  # noqa: S603
         command,
         stdin=slave_fd,
@@ -491,8 +519,11 @@ async def handle_terminal_ws(socket: WebSocket[Any, Any, Any]) -> None:
     except Exception:
         pass
 
-    if tab.output_buf:
-        await socket.send_data(b"\x00" + bytes(tab.output_buf), mode="binary")
+    # Replayed in pieces rather than one frame: the buffer is megabytes now, and a frame that large
+    # has to survive every proxy between here and the browser. Live output is already split at
+    # arbitrary read boundaries, so the client handles a split the same way either way.
+    for frame in replay_frames(bytes(tab.output_buf)):
+        await socket.send_data(b"\x00" + frame, mode="binary")
 
     async def pty_to_ws() -> None:
         try:

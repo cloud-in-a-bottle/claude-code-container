@@ -251,3 +251,74 @@ def test_the_server_catches_hangups_rather_than_masking_them() -> None:
     handler = signal.getsignal(signal.SIGHUP)
     assert handler not in (signal.SIG_DFL, signal.SIG_IGN)
     assert callable(handler)
+
+
+def test_the_replay_buffer_keeps_the_most_recent_output_when_it_overflows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """What a reattaching browser wants is the end of the session, not its beginning."""
+    monkeypatch.setattr(tabs_module, "_BUF_MAX", 32)
+    buf = bytearray()
+    for i in range(100):
+        tabs_module.record_output(buf, f"line {i}\r\n".encode())
+    assert len(buf) == 32
+    assert buf.endswith(b"line 99\r\n")
+
+
+def test_the_replay_buffer_holds_everything_until_it_is_full() -> None:
+    buf = bytearray()
+    tabs_module.record_output(buf, b"first")
+    tabs_module.record_output(buf, b"second")
+    assert bytes(buf) == b"firstsecond"
+
+
+def test_a_replay_under_the_frame_size_is_still_sent_in_one_piece() -> None:
+    assert list(tabs_module.replay_frames(b"hello")) == [b"hello"]
+    assert list(tabs_module.replay_frames(b"")) == []
+
+
+def test_a_long_replay_is_split_into_frames_that_reassemble_exactly() -> None:
+    """Splitting must not lose or reorder a byte: the buffer is a pty stream, escape codes and all."""
+    buf = os.urandom(tabs_module._REPLAY_CHUNK * 2 + 17)
+    frames = list(tabs_module.replay_frames(buf))
+    assert len(frames) == 3
+    assert all(len(f) <= tabs_module._REPLAY_CHUNK for f in frames)
+    assert b"".join(frames) == buf
+
+
+def test_every_terminal_runs_claude_on_the_classic_renderer(workbench_home: Path) -> None:
+    """The fullscreen renderer keeps its scrollback in the alternate screen, out of the browser's reach.
+
+    Asserted on a real spawned tab rather than on the env dict, because what matters is what a
+    process started by a tab actually inherits.
+    """
+
+    async def spawn_and_read() -> str:
+        tab = await tabs_module.create_server_tab(
+            command=["bash", "-c", "printenv CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN"],
+            cwd=str(workbench_home),
+            label="t",
+        )
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not tab.output_buf:
+            await asyncio.sleep(0.05)
+        # Killed inside the loop for the same reason as the process-group test above.
+        tabs_module.kill_tab(tab)
+        return bytes(tab.output_buf).decode(errors="replace")
+
+    assert asyncio.run(spawn_and_read()).strip() == "1"
+
+
+def test_a_caller_can_still_override_the_environment_a_tab_starts_with(workbench_home: Path) -> None:
+    async def spawn_and_read() -> str:
+        tab = await tabs_module.create_server_tab(
+            command=["bash", "-c", "printenv CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN"],
+            cwd=str(workbench_home),
+            label="t",
+            env={"CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN": "caller-wins"},
+        )
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not tab.output_buf:
+            await asyncio.sleep(0.05)
+        tabs_module.kill_tab(tab)
+        return bytes(tab.output_buf).decode(errors="replace")
+
+    assert asyncio.run(spawn_and_read()).strip() == "caller-wins"
