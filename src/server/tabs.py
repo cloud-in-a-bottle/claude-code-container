@@ -17,6 +17,7 @@ from typing import Any
 import attr
 from litestar import WebSocket
 
+from server.claude_sessions import latest_session_id
 from server.config import HOME
 from server.projects.workspaces import Workspace
 from server.projects.workspaces import parse_workspace_id
@@ -422,10 +423,17 @@ async def new_tab_in_workspace(workspace: Workspace, label: str | None = None) -
     key = await get_anthropic_key()
     env: dict[str, str] = {"ANTHROPIC_API_KEY": key} if key else {}
     claude_bin = shutil.which("claude") or "claude"
-    session_id = new_session_id()
+    # Prefer the conversation this workspace already has. Reaching here with one on disk means the
+    # tab list was lost while the transcript survived -- the tab list is the fragile half, since it
+    # only records tabs that were live at the last write. Minting a fresh id in that situation
+    # orphans real work: the conversation stays on disk with nothing pointing at it, and the user
+    # gets an empty Claude in a workspace they had been talking to.
+    adopted = latest_session_id(cwd)
+    session_id = adopted or new_session_id()
     # A retry that follows a crash must rejoin the session the crashed attempt created, not
-    # collide with it — claude rejects --session-id for an id that already exists.
-    attempt = claude_session_command(claude_bin, session_id, resume_first=False)
+    # collide with it — claude rejects --session-id for an id that already exists. Same pair of
+    # commands either way; only the order changes, so the user doesn't see a spurious error first.
+    attempt = claude_session_command(claude_bin, session_id, resume_first=bool(adopted))
     return await create_server_tab(
         command=["bash", "-l", "-c", f"for _i in 1 2 3; do {{ {attempt}; }} && break; sleep 1; done; exec bash"],
         cwd=cwd,

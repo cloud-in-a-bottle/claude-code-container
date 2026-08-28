@@ -5,8 +5,10 @@ from typing import Any
 
 import pytest
 
+from server import claude_sessions
 from server import tab_store
 from server import tabs
+from server import ui_settings
 from server.projects import store
 from server.projects import workspaces
 
@@ -37,14 +39,53 @@ def stack() -> Iterator[OpenhostStack]:
         yield s
 
 
+# Every module-level path the server writes to, and where each is redirected under a temp home.
+# Anything added here must also be added to _STATE_PATHS below or the guard misses it.
+_STATE_PATHS: tuple[tuple[Any, str, str], ...] = (
+    (store, "PROJECTS_PATH", ".workbench/projects.json"),
+    (workspaces, "WORKSPACES_ROOT", "workspaces"),
+    (workspaces, "MIRRORS_DIR", ".workbench/mirrors"),
+    (tab_store, "TABS_PATH", ".workbench/tabs.json"),
+    (ui_settings, "UI_SETTINGS_PATH", ".workbench/ui.json"),
+    (claude_sessions, "CLAUDE_PROJECTS_DIR", ".claude/projects"),
+)
+
+
+def _redirect_state(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for module, attribute, relative in _STATE_PATHS:
+        monkeypatch.setattr(module, attribute, root / relative)
+    # persist_tabs() skips a write whose snapshot matches this, so a value left over from an
+    # earlier test would suppress the first write against the new path.
+    monkeypatch.setattr(tabs, "_last_persisted", [])
+
+
+@pytest.fixture(autouse=True)
+def _isolate_workbench_state(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep every test off the real $HOME, whether or not it asked to be kept off it.
+
+    This is autouse rather than opt-in because of how the workbench gets used: it is its own
+    dogfood, so `just test` routinely runs *inside* a live workbench, against the same $HOME the
+    running server is persisting to. A test that reaches the real state files there does not fail
+    loudly -- it quietly destroys the user's session. That is not hypothetical. Before this
+    existed, `test_delete_workspace_kills_its_tabs` went through the real delete route into
+    `persist_tabs()` and overwrote `~/.workbench/tabs.json` with its own fixture tabs, so the next
+    restart restored nothing and every running Claude conversation was orphaned:
+
+        [tabs] dropping tab 'claude': workspace 'r/keep' is gone
+        [tabs] restored 0 tab(s) from the previous run
+
+    Opting in per test is the wrong shape for that failure mode. Forgetting is silent, and the
+    damage lands on the user rather than on the test.
+    """
+    _redirect_state(tmp_path_factory.mktemp("workbench-state"), monkeypatch)
+
+
 @pytest.fixture
 def workbench_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Point every piece of on-disk workbench state at a temp dir, so tests never touch $HOME."""
-    monkeypatch.setattr(store, "PROJECTS_PATH", tmp_path / ".workbench" / "projects.json")
-    monkeypatch.setattr(workspaces, "WORKSPACES_ROOT", tmp_path / "workspaces")
-    monkeypatch.setattr(workspaces, "MIRRORS_DIR", tmp_path / ".workbench" / "mirrors")
-    # The tab list too: the workbench is run from inside itself, so a test suite that wrote to the
-    # real one would delete the tabs of the workbench it is running in.
-    monkeypatch.setattr(tab_store, "TABS_PATH", tmp_path / ".workbench" / "tabs.json")
-    monkeypatch.setattr(tabs, "_last_persisted", [])
+    """Point every piece of on-disk workbench state at a temp dir, so tests never touch $HOME.
+
+    `_isolate_workbench_state` already guarantees the safety half of this; what this adds is a
+    *known* directory the test can then make assertions about.
+    """
+    _redirect_state(tmp_path, monkeypatch)
     return tmp_path
