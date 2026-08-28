@@ -62,8 +62,14 @@ def test_a_hangup_from_inside_does_not_take_the_container_down(stack: OpenhostSt
     container = f"openhost-{manifest['app']['name']}"
     started_at = _podman("inspect", container, "--format", "{{.State.StartedAt}}")
 
-    _podman("exec", container, "kill", "-HUP", "1")
-    time.sleep(3)
-
-    assert httpx.get(f"{stack.app_url}/health").json() == {"status": "ok"}
-    assert _podman("inspect", container, "--format", "{{.State.StartedAt}}") == started_at
+    # Both targets matter and they fail for different reasons: pid 1 is tini, which installs no
+    # SIGHUP handler of its own, and pid 2 is the server, which took a version of this fix that
+    # only masked the signal in its main thread -- enough for the mask to look right in
+    # /proc/2/status while a hypercorn thread still died of it.
+    for target in ("1", "2"):
+        _podman("exec", container, "kill", "-HUP", target)
+        time.sleep(3)
+        assert httpx.get(f"{stack.app_url}/health").json() == {"status": "ok"}, f"died on pid {target}"
+        assert _podman("inspect", container, "--format", "{{.State.StartedAt}}") == started_at, (
+            f"restarted after SIGHUP to pid {target}"
+        )

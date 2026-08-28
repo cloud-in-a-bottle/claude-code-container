@@ -4,7 +4,6 @@ import asyncio
 import json
 import os
 import signal
-import sys
 import time
 from collections.abc import Generator
 from pathlib import Path
@@ -241,13 +240,14 @@ def test_tabs_can_still_be_hung_up_after_the_server_makes_itself_immune(workbenc
     raise AssertionError("the tab ignored SIGHUP: the child inherited the server's signal mask")
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="sigwaitinfo, and so the diagnostic, is Linux-only")
-def test_the_server_keeps_hangups_pending_so_it_can_report_the_sender() -> None:
-    """Blocked, and left on SIG_DFL on purpose.
+def test_the_server_catches_hangups_rather_than_masking_them() -> None:
+    """A handler, not a mask.
 
-    An ignored signal is discarded by the kernel rather than queued, which would silently cost us
-    the one diagnostic that can name whatever is sending these.
+    A signal mask is per-thread, and a process-directed SIGHUP lands on any thread that doesn't
+    block it -- masking it in the main thread still let one through to a hypercorn thread that died
+    of it. A handler belongs to the process, so it holds whichever thread takes the signal.
     """
     survive_hangups()
-    assert signal.SIGHUP in signal.pthread_sigmask(signal.SIG_BLOCK, set())
-    assert signal.getsignal(signal.SIGHUP) is signal.SIG_DFL
+    handler = signal.getsignal(signal.SIGHUP)
+    assert handler not in (signal.SIG_DFL, signal.SIG_IGN)
+    assert callable(handler)
