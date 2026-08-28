@@ -9,10 +9,12 @@ from litestar import patch
 from litestar import post
 from litestar.params import FromPath
 
+from server.editor import instances as editor_instances
 from server.git_remote import REF_RE
 from server.git_remote import RepoAccess
 from server.git_remote import repo_dir_name
 from server.git_remote import resolve_access
+from server.git_remote import resolve_default_branch
 from server.git_remote import validate_repo_url
 from server.projects.launch import start_workspace_tab
 from server.projects.store import Project
@@ -50,8 +52,16 @@ def project_json(project: Project) -> JsonDict:
         "name": project.name,
         "repo_url": project.repo_url,
         "setup": project.setup,
+        "default_branch": project.default_branch,
         "workspaces": [{"id": w.id, "name": w.name, "path": str(w.path)} for w in list_workspaces(project.id)],
     }
+
+
+def _bad_ref(value: str, field: str) -> Response[JsonDict] | None:
+    """Guard every branch/ref that reaches a `git` command line."""
+    if value and not REF_RE.match(value):
+        return error(400, error="bad_request", message=f"{field} contains invalid characters")
+    return None
 
 
 def _access_error(access: RepoAccess) -> Response[JsonDict] | None:
@@ -77,34 +87,62 @@ async def create_project(request: Request[Any, Any, Any]) -> Response[JsonDict]:
     if not validate_repo_url(repo_url):
         return error(400, error="bad_request", message="repo_url must be an http(s)/ssh/git@ clone url")
 
-    # Check the repo is really reachable now, rather than letting every workspace creation fail
-    # later with a wall of git output.
-    access = await resolve_access(repo_url, "HEAD")
+    default_branch = str(data.get("default_branch") or "").strip()
+    invalid = _bad_ref(default_branch, "default_branch")
+    if invalid is not None:
+        return invalid
+
+    # Check the repo — and the branch its workspaces will start from — is really reachable now,
+    # rather than letting every workspace creation fail later with a wall of git output.
+    access = await resolve_access(repo_url, default_branch or "HEAD")
     failed = _access_error(access)
     if failed is not None:
         return failed
 
     name = str(data.get("name") or "").strip() or repo_dir_name(repo_url)
-    project = add_project(name=name, repo_url=repo_url, setup=str(data.get("setup") or ""))
+    project = add_project(
+        name=name,
+        repo_url=repo_url,
+        setup=str(data.get("setup") or ""),
+        default_branch=default_branch,
+    )
     return Response(content=project_json(project))
 
 
 @patch("/api/projects/{project_id:str}", status_code=200)
 async def update_project(project_id: FromPath[str], request: Request[Any, Any, Any]) -> Response[JsonDict]:
-    """Edit a project's name or setup command. Keys left out keep their current value."""
+    """Edit a project's name, setup command or default branch. Keys left out keep their value."""
     project = find_project(project_id)
     if project is None:
         return error(404, error="not_found", message=f"no project {project_id}")
 
     data = await json_body(request)
-    known = {"name", "setup"}
+    known = {"name", "setup", "default_branch"}
     if not known & data.keys():
         return error(400, error="bad_request", message=f"expected at least one of: {', '.join(sorted(known))}")
 
     name = str(data.get("name", project.name)).strip()
     if not name:
         return error(400, error="bad_request", message="name cannot be empty")
-    updated = Project(id=project.id, name=name, repo_url=project.repo_url, setup=str(data.get("setup", project.setup)))
+
+    default_branch = str(data.get("default_branch", project.default_branch)).strip()
+    invalid = _bad_ref(default_branch, "default_branch")
+    if invalid is not None:
+        return invalid
+    # Only worth a round trip when it actually changed: renaming a project shouldn't wait on the
+    # network, but pointing it at a branch that doesn't exist should fail here, not in a workspace.
+    if default_branch and default_branch != project.default_branch:
+        failed = _access_error(await resolve_access(project.repo_url, default_branch))
+        if failed is not None:
+            return failed
+
+    updated = Project(
+        id=project.id,
+        name=name,
+        repo_url=project.repo_url,
+        setup=str(data.get("setup", project.setup)),
+        default_branch=default_branch,
+    )
     save_projects(tuple(updated if p.id == project.id else p for p in load_projects()))
     return Response(content=project_json(updated))
 
@@ -139,13 +177,20 @@ async def create_workspace(request: Request[Any, Any, Any]) -> Response[JsonDict
         return error(404, error="not_found", message="no such project")
 
     ref = str(data.get("ref") or "").strip()
-    if ref and not REF_RE.match(ref):
-        return error(400, error="bad_request", message="ref contains invalid characters")
+    invalid = _bad_ref(ref, "ref")
+    if invalid is not None:
+        return invalid
+    # An explicit ref wins; otherwise the project's configured starting branch.
+    ref = ref or project.default_branch
 
     access = await resolve_access(project.repo_url, ref or "HEAD")
     failed = _access_error(access)
     if failed is not None:
         return failed
+
+    # With neither, ask the remote what its default branch is *now*, so the checkout follows a
+    # renamed default instead of the one the mirror happened to see when it was first cloned.
+    ref = ref or await resolve_default_branch(project.repo_url, access.token)
 
     requested = str(data.get("name") or "").strip()
     name = unique_workspace_name(project.id, requested or ref or "workspace")
@@ -172,5 +217,9 @@ async def remove_workspace(project_id: FromPath[str], name: FromPath[str]) -> Re
     for tab in tabs_for_workspace(workspace.id):
         _tabs.pop(tab.id, None)
         kill_tab(tab)
+    # Before the directory goes: an editor left running over a deleted workspace holds a GB of
+    # process for a folder that no longer exists.
+    await editor_instances.stop(workspace.id)
+    editor_instances.forget_workspace(workspace.id)
     delete_workspace(workspace)
     return Response(content={"ok": True})

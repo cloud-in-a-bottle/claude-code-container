@@ -6,9 +6,11 @@ from typing import Any
 import pytest
 
 from server import claude_sessions
+from server import remote_services
 from server import tab_store
 from server import tabs
 from server import ui_settings
+from server.editor import paths as editor_paths
 from server.projects import store
 from server.projects import workspaces
 
@@ -48,6 +50,18 @@ _STATE_PATHS: tuple[tuple[Any, str, str], ...] = (
     (tab_store, "TABS_PATH", ".workbench/tabs.json"),
     (ui_settings, "UI_SETTINGS_PATH", ".workbench/ui.json"),
     (claude_sessions, "CLAUDE_PROJECTS_DIR", ".claude/projects"),
+    (remote_services, "GH_HOSTS_PATH", ".config/gh/hosts.yml"),
+    (remote_services, "GH_MANAGED_MARKER", ".workbench/gh-auth-managed"),
+    (remote_services, "GIT_CONFIG_PATH", ".gitconfig"),
+    (editor_paths, "VSCODE_DIR", ".workbench/vscode"),
+    (editor_paths, "INSTALL_DIR", ".workbench/vscode/install"),
+    (editor_paths, "SHARED_USER_DIR", ".workbench/vscode/user"),
+    (editor_paths, "EXTENSIONS_DIR", ".workbench/vscode/extensions"),
+    (editor_paths, "INSTANCES_DIR", ".workbench/vscode/instances"),
+    (editor_paths, "CONFIG_PATH", ".workbench/vscode/config.yaml"),
+    # Not $HOME state — sockets live in /tmp — but redirected all the same, so a test can't reach
+    # the socket a running workbench is serving its editors on.
+    (editor_paths, "SOCKETS_DIR", "vscode-sockets"),
 )
 
 

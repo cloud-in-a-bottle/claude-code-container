@@ -21,12 +21,19 @@ const [state, setState] = createStore({
 });
 
 const [theme, setThemeSignal] = createSignal(THEMES[bootstrap.theme] ? bootstrap.theme : DEFAULT_THEME);
+/** Bumped when something asks for an editor panel. The layout owns dockview, so it does the
+ *  opening; this is how the top bar reaches it without a reference to the dock. */
+const [editorRequests, setEditorRequests] = createSignal(0);
 const [sidebarHidden, setSidebarHiddenSignal] = createSignal(localStorage.getItem(SIDEBAR_HIDDEN_KEY) === '1');
 
 /** Guards against a slow workspace load landing after the user has moved on to another one. */
 let switchToken = 0;
 
-export { state, theme, sidebarHidden };
+export { state, theme, sidebarHidden, editorRequests };
+
+export function requestEditor() {
+  setEditorRequests((n) => n + 1);
+}
 
 export function toggleSidebar() {
   const hidden = !sidebarHidden();
@@ -120,8 +127,8 @@ export function forgetTab(tabId) {
   setState('tabs', (tabs) => tabs.filter((t) => t.id !== tabId));
 }
 
-export async function createProject(repoUrl, name, setup) {
-  const project = await api.createProject(repoUrl, name, setup);
+export async function createProject(repoUrl, name, setup, defaultBranch) {
+  const project = await api.createProject(repoUrl, name, setup, defaultBranch);
   await refreshProjects();
   return project;
 }

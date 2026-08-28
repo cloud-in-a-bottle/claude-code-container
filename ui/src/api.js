@@ -15,8 +15,8 @@ async function request(method, url, body) {
 }
 
 export const listProjects = () => request('GET', '/api/projects');
-export const createProject = (repoUrl, name, setup) =>
-  request('POST', '/api/projects', { repo_url: repoUrl, name, setup });
+export const createProject = (repoUrl, name, setup, defaultBranch) =>
+  request('POST', '/api/projects', { repo_url: repoUrl, name, setup, default_branch: defaultBranch });
 export const updateProject = (id, patch) => request('PATCH', `/api/projects/${encodeURIComponent(id)}`, patch);
 export const deleteProject = (id) => request('DELETE', `/api/projects/${encodeURIComponent(id)}`);
 
@@ -32,3 +32,8 @@ export const deleteTab = (tabId) => request('DELETE', `/api/tabs/${encodeURIComp
 export const kickTab = (tabId) => request('POST', `/api/tabs/${encodeURIComponent(tabId)}/kick`);
 
 export const saveUiSettings = (patch) => request('POST', '/api/ui/settings', patch);
+
+export const listEditors = () => request('GET', '/api/editor');
+export const startEditor = (workspaceId) => request('POST', '/api/editor', { workspace_id: workspaceId });
+export const stopEditor = (workspaceId) =>
+  request('DELETE', `/api/editor/${workspaceId.split('/').map(encodeURIComponent).join('/')}`);

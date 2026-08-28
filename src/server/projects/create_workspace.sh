@@ -5,7 +5,9 @@
 #   WS_PATH          absolute path of the workspace dir (already created, empty)
 #   WS_REPO          clone URL, kept token-free: this is what origin ends up pointing at
 #   WS_MIRROR        absolute path of the project's bare mirror
-#   WS_REF           optional branch/tag/sha to check out instead of the default branch
+#   WS_REF           branch/tag/sha to check out. The server normally fills this in with the
+#                    project's configured default branch, or the branch the remote's HEAD points
+#                    at right now; blank falls back to whatever the mirror's HEAD says.
 #   WS_SETUP         optional one-off setup command, run in the workspace before Claude
 #   WS_GITHUB_TOKEN  optional transient token, used for network git only and never written to disk
 #   CLAUDE_BIN, CLAUDE_SESSION_ID
@@ -36,8 +38,10 @@ echo
 if [ -d "$WS_MIRROR" ]; then
     echo "[workbench] updating mirror for $WS_REPO"
     git --git-dir="$WS_MIRROR" remote set-url origin "$AUTHED_URL"
+    # Every branch and tag, every time: the workspace is cloned from the mirror, so this fetch is
+    # the only thing standing between it and a checkout that is behind upstream.
     git --git-dir="$WS_MIRROR" fetch --prune origin '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*' \
-        || echo "[workbench] mirror fetch failed; using the copy already on disk." >&2
+        || echo "[workbench] mirror fetch failed; falling back to the copy on disk, which may be behind upstream." >&2
     # Leave no token behind in the mirror's config.
     git --git-dir="$WS_MIRROR" remote set-url origin "$WS_REPO"
 else
