@@ -117,7 +117,7 @@ skill walks Claude through all of this.
 ## Projects and workspaces
 
 A **project** is a git repo you've told the workbench about: a name, a clone
-URL, and optionally a setup command. A **workspace** is one full copy of that
+URL, and optionally a default branch and a setup command. A **workspace** is one full copy of that
 repo on disk. There can be as many workspaces of a project as you like and none
 of them is special — there is deliberately no canonical checkout to be careful
 around. They're independent working copies, similar in spirit to git worktrees
@@ -148,13 +148,31 @@ Add a project with **+** in the sidebar (a clone URL is the only thing
 required); the workbench checks the repo is reachable before saving it, so a
 typo fails once, there and then, rather than in every workspace afterwards.
 Then **+** next to a project creates a workspace in it: pick a name, and
-optionally a branch, tag or commit — blank means the default branch. A workspace
-does not create a branch for you.
+optionally a branch, tag or commit — blank means the project's starting branch.
+A workspace does not create a branch for you.
 
 Creating one opens a terminal running the bootstrap: update the mirror, clone,
-run the project's setup command if it has one, then hand the terminal over to
-Claude Code. You watch all of it happen; if a step fails you're left in a shell
-in the workspace rather than staring at a tab that vanished.
+check out the branch, run the project's setup command if it has one, then hand
+the terminal over to Claude Code. You watch all of it happen; if a step fails
+you're left in a shell in the workspace rather than staring at a tab that
+vanished.
+
+### Where a workspace starts
+
+A project can name a **default branch** that its workspaces start from; leave it
+blank and they follow the repo's own default. Either way the branch is checked
+against the remote when you set it, so a branch that isn't there fails at the
+dialog rather than in the bootstrap.
+
+Workspaces always start at the *newest* commit on that branch. Two things make
+that true: the mirror fetches every branch and tag from upstream immediately
+before the workspace is cloned out of it, and — when the project has no default
+branch of its own — the server asks the remote which branch its `HEAD` points at
+*now* rather than trusting the mirror's, so a repo that renames its default is
+followed instead of silently checked out at the old one.
+
+If the remote can't be reached, the bootstrap says so and falls back to the
+mirror already on disk. You get a workspace either way; it just may be behind.
 
 Deleting a workspace deletes the directory and kills its terminals, and is not
 recoverable. Removing a project forgets it and deletes its mirror, but refuses
@@ -164,8 +182,8 @@ while it still has workspaces — those hold your work.
 
 ```
 GET    /api/projects                          projects, each with its workspaces
-POST   /api/projects        {repo_url, name?, setup?}
-PATCH  /api/projects/{id}   {name?, setup?}
+POST   /api/projects        {repo_url, name?, setup?, default_branch?}
+PATCH  /api/projects/{id}   {name?, setup?, default_branch?}
 DELETE /api/projects/{id}
 POST   /api/workspaces      {project_id, name?, ref?}
 DELETE /api/workspaces/{project}/{workspace}

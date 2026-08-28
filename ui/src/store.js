@@ -120,8 +120,8 @@ export function forgetTab(tabId) {
   setState('tabs', (tabs) => tabs.filter((t) => t.id !== tabId));
 }
 
-export async function createProject(repoUrl, name, setup) {
-  const project = await api.createProject(repoUrl, name, setup);
+export async function createProject(repoUrl, name, setup, defaultBranch) {
+  const project = await api.createProject(repoUrl, name, setup, defaultBranch);
   await refreshProjects();
   return project;
 }

@@ -27,15 +27,35 @@ def clear_tabs() -> Generator[None]:
     _tabs.clear()
 
 
+@pytest.fixture(autouse=True)
+def offline_default_branch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No unit test should reach for a real remote. Tests that care stub a real answer back."""
+    _stub_default_branch(monkeypatch, "")
+
+
 def _client() -> TestClient[Litestar]:
     return TestClient(app=srv.app)
 
 
-def _stub_access(monkeypatch: pytest.MonkeyPatch, decision: str = "ok", token: str = "") -> None:
+def _stub_access(monkeypatch: pytest.MonkeyPatch, decision: str = "ok", token: str = "") -> list[tuple[str, str]]:
+    """Stub the reachability probe; returns a log of the (repo, ref) pairs it was asked about."""
+    probed: list[tuple[str, str]] = []
+
     async def fake(repo: str, ref: str) -> git_remote.RepoAccess:
+        probed.append((repo, ref))
         return git_remote.RepoAccess(decision=decision, token=token)
 
     monkeypatch.setattr(project_routes, "resolve_access", fake)
+    return probed
+
+
+def _stub_default_branch(monkeypatch: pytest.MonkeyPatch, branch: str) -> None:
+    """Stub what the remote says its own default branch is right now."""
+
+    async def fake(repo: str, token: str = "") -> str:
+        return branch
+
+    monkeypatch.setattr(project_routes, "resolve_default_branch", fake)
 
 
 def _stub_tabs(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
@@ -93,6 +113,12 @@ def test_projects_round_trip(workbench_home: Path) -> None:
     assert store.load_projects() == ()
 
 
+def test_default_branch_survives_a_round_trip(workbench_home: Path) -> None:
+    store.add_project("r", "https://example.com/r.git", default_branch="develop")
+    loaded = store.find_project("r")
+    assert loaded is not None and loaded.default_branch == "develop"
+
+
 def test_two_projects_on_the_same_name_get_distinct_ids(workbench_home: Path) -> None:
     first = store.add_project("repo", "https://example.com/a/repo.git")
     second = store.add_project("repo", "https://example.com/b/repo.git")
@@ -116,6 +142,22 @@ def test_project_id_from_disk_is_validated(workbench_home: Path) -> None:
     _write_project_file(workbench_home, '[{"id": "../escape", "repo_url": "https://example.com/r.git"}]')
     with pytest.raises(ValueError, match="malformed project id"):
         store.load_projects()
+
+
+def test_default_branch_from_disk_is_validated(workbench_home: Path) -> None:
+    """projects.json is hand-editable and the branch reaches a `git` command line."""
+    _write_project_file(
+        workbench_home,
+        '[{"id": "r", "repo_url": "https://example.com/r.git", "default_branch": "--upload-pack=x"}]',
+    )
+    with pytest.raises(ValueError, match="malformed default branch"):
+        store.load_projects()
+
+
+def test_a_project_saved_before_default_branches_existed_still_loads(workbench_home: Path) -> None:
+    """An older projects.json has no `default_branch` key; that means "follow the repo's own"."""
+    _write_project_file(workbench_home, '[{"id": "r", "repo_url": "https://example.com/r.git"}]')
+    assert store.load_projects()[0].default_branch == ""
 
 
 # ── workspaces on disk ─────────────────────────────────────────────────────────
@@ -179,6 +221,7 @@ def test_create_and_list_projects(workbench_home: Path, monkeypatch: pytest.Monk
         "name": "r",
         "repo_url": "https://github.com/o/r.git",
         "setup": "",
+        "default_branch": "",
         "workspaces": [],
     }
     assert [p["id"] for p in client.get("/api/projects").json()] == ["r"]
@@ -199,12 +242,90 @@ def test_create_project_reports_an_unreachable_repo(workbench_home: Path, monkey
     assert store.load_projects() == ()
 
 
+def test_create_project_checks_the_configured_default_branch_exists(
+    workbench_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Probed as itself rather than as HEAD, so a typo fails once, here."""
+    probed = _stub_access(monkeypatch)
+    resp = _client().post("/api/projects", json={"repo_url": "https://github.com/o/r.git", "default_branch": "trunk"})
+
+    assert resp.status_code == 200
+    assert resp.json()["default_branch"] == "trunk"
+    assert probed == [("https://github.com/o/r.git", "trunk")]
+    saved = store.find_project("r")
+    assert saved is not None and saved.default_branch == "trunk"
+
+
+def test_create_project_rejects_a_missing_default_branch(
+    workbench_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_access(monkeypatch, "not_found")
+    resp = _client().post("/api/projects", json={"repo_url": "https://github.com/o/r.git", "default_branch": "ghost"})
+    assert resp.status_code == 404
+    assert store.load_projects() == ()
+
+
+@pytest.mark.parametrize("branch", ["--upload-pack=touch /tmp/pwned", "a branch", "-x"])
+def test_create_project_rejects_an_unsafe_default_branch(
+    workbench_home: Path, monkeypatch: pytest.MonkeyPatch, branch: str
+) -> None:
+    """The branch ends up on a `git` command line, so it never gets there unvalidated."""
+    _stub_access(monkeypatch)
+    resp = _client().post("/api/projects", json={"repo_url": "https://github.com/o/r.git", "default_branch": branch})
+    assert resp.status_code == 400
+    assert store.load_projects() == ()
+
+
 def test_update_project_changes_name_and_setup(workbench_home: Path) -> None:
     store.add_project("r", "https://github.com/o/r.git")
     resp = _client().patch("/api/projects/r", json={"setup": "just setup"})
     assert resp.status_code == 200
     updated = store.find_project("r")
     assert updated is not None and updated.setup == "just setup"
+
+
+def test_update_project_sets_the_default_branch(workbench_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    probed = _stub_access(monkeypatch)
+    store.add_project("r", "https://github.com/o/r.git")
+
+    assert _client().patch("/api/projects/r", json={"default_branch": "develop"}).status_code == 200
+    updated = store.find_project("r")
+    assert updated is not None and updated.default_branch == "develop"
+    assert probed == [("https://github.com/o/r.git", "develop")]
+
+
+def test_update_project_refuses_a_default_branch_the_repo_does_not_have(
+    workbench_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_access(monkeypatch, "not_found")
+    store.add_project("r", "https://github.com/o/r.git", default_branch="main")
+
+    assert _client().patch("/api/projects/r", json={"default_branch": "ghost"}).status_code == 404
+    unchanged = store.find_project("r")
+    assert unchanged is not None and unchanged.default_branch == "main"
+
+
+def test_clearing_the_default_branch_returns_to_the_repos_own(
+    workbench_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    probed = _stub_access(monkeypatch)
+    store.add_project("r", "https://github.com/o/r.git", default_branch="develop")
+
+    assert _client().patch("/api/projects/r", json={"default_branch": ""}).status_code == 200
+    cleared = store.find_project("r")
+    assert cleared is not None and cleared.default_branch == ""
+    assert probed == []
+
+
+def test_renaming_a_project_does_not_re_probe_its_branch(
+    workbench_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A rename shouldn't wait on the network for a branch that hasn't changed."""
+    probed = _stub_access(monkeypatch)
+    store.add_project("r", "https://github.com/o/r.git", default_branch="develop")
+
+    assert _client().patch("/api/projects/r", json={"name": "renamed"}).status_code == 200
+    assert probed == []
 
 
 def test_delete_project_refuses_while_it_still_has_workspaces(workbench_home: Path) -> None:
@@ -261,6 +382,63 @@ def test_creating_the_same_workspace_name_twice_makes_two(
     first = client.post("/api/workspaces", json={"project_id": "r", "name": "main"}).json()
     second = client.post("/api/workspaces", json={"project_id": "r", "name": "main"}).json()
     assert (first["name"], second["name"]) == ("main", "main-2")
+
+
+def test_workspaces_start_from_the_projects_default_branch(
+    workbench_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    probed = _stub_access(monkeypatch)
+    created = _stub_tabs(monkeypatch)
+    store.add_project("r", "https://github.com/o/r.git", default_branch="develop")
+
+    assert _client().post("/api/workspaces", json={"project_id": "r", "name": "ws"}).status_code == 200
+    # Probed as itself, not as HEAD: a configured branch that has gone away has to say so.
+    assert probed == [("https://github.com/o/r.git", "develop")]
+    assert created[0]["env"]["WS_REF"] == "develop"
+
+
+def test_an_explicit_ref_beats_the_projects_default_branch(
+    workbench_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_access(monkeypatch)
+    created = _stub_tabs(monkeypatch)
+    store.add_project("r", "https://github.com/o/r.git", default_branch="develop")
+
+    assert _client().post("/api/workspaces", json={"project_id": "r", "ref": "v1.2.3"}).status_code == 200
+    assert created[0]["env"]["WS_REF"] == "v1.2.3"
+
+
+def test_without_a_default_branch_the_remotes_own_head_is_resolved(
+    workbench_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Asked of the remote at creation time, so a renamed default is followed rather than the
+    stale one the mirror's HEAD still points at."""
+    _stub_access(monkeypatch)
+    _stub_default_branch(monkeypatch, "trunk")
+    created = _stub_tabs(monkeypatch)
+    store.add_project("r", "https://github.com/o/r.git")
+
+    resp = _client().post("/api/workspaces", json={"project_id": "r"})
+    assert resp.status_code == 200
+    assert created[0]["env"]["WS_REF"] == "trunk"
+    # With nothing else to go on, the branch names the workspace.
+    assert resp.json()["name"] == "trunk"
+
+
+def test_an_unresolvable_default_branch_leaves_the_checkout_to_the_mirror(
+    workbench_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A blank WS_REF is the bootstrap's cue to take the mirror's HEAD -- staler, but still a
+    workspace rather than an error."""
+    _stub_access(monkeypatch)
+    _stub_default_branch(monkeypatch, "")
+    created = _stub_tabs(monkeypatch)
+    store.add_project("r", "https://github.com/o/r.git")
+
+    resp = _client().post("/api/workspaces", json={"project_id": "r"})
+    assert resp.status_code == 200
+    assert created[0]["env"]["WS_REF"] == ""
+    assert resp.json()["name"] == "workspace"
 
 
 def test_create_workspace_rejects_an_unsafe_ref(workbench_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:

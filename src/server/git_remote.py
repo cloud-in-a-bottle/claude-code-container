@@ -12,6 +12,9 @@ from server.remote_services import fetch_github_token
 # character set.
 REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 
+# The `ref: refs/heads/<branch>\tHEAD` line `git ls-remote --symref` prints for the remote's HEAD.
+SYMREF_HEAD_RE = re.compile(r"^ref:\s+refs/heads/(\S+)\s+HEAD$", re.MULTILINE)
+
 # A ref that looks like a bare commit sha. `git ls-remote` only lists named refs, so a sha can't
 # be validated ahead of the clone — we skip the pre-check and let the checkout degrade gracefully.
 SHA_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
@@ -76,9 +79,9 @@ def inject_github_token(url: str, token: str) -> str:
     return url
 
 
-async def run_ls_remote(repo: str, ref: str | None, token: str) -> tuple[int, str, str]:
+async def run_ls_remote(repo: str, ref: str | None, token: str, symref: bool = False) -> tuple[int, str, str]:
     url = inject_github_token(repo, token) if token else repo
-    args = ["git", "ls-remote", url]
+    args = ["git", "ls-remote", *(["--symref"] if symref else []), url]
     if ref:
         args.append(ref)
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -oBatchMode=yes"}
@@ -118,3 +121,17 @@ async def resolve_access(repo: str, ref: str) -> RepoAccess:
     if _AUTH_ERR_RE.search(err):
         return RepoAccess(decision="forbidden", detail=err.strip())
     return RepoAccess(decision="not_found", detail=err.strip())
+
+
+async def resolve_default_branch(repo: str, token: str = "") -> str:
+    """The branch the remote's HEAD points at, e.g. `main`.
+
+    Read from the remote every time rather than cached on the project: a repo that renames its
+    default branch should be followed, not remembered wrong. `""` when it can't be read — callers
+    fall back to whatever the local mirror's HEAD says, which is the older, staler answer.
+    """
+    rc, out, _err = await run_ls_remote(repo, "HEAD", token=token, symref=True)
+    if rc != 0:
+        return ""
+    match = SYMREF_HEAD_RE.search(out)
+    return match.group(1) if match else ""
