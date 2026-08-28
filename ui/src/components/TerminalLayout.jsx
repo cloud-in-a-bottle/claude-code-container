@@ -1,8 +1,10 @@
 import { DockviewSolid } from '@arminmajerie/dockview-solid';
 import '@arminmajerie/dockview-solid/styles/dockview.css';
-import { Show, createEffect, onCleanup, untrack } from 'solid-js';
+import { Show, createEffect, on, onCleanup, untrack } from 'solid-js';
 
-import { closeTab, newTab, state, takeFocusTab } from '../store';
+import * as api from '../api';
+import { closeTab, editorRequests, newTab, state, takeFocusTab } from '../store';
+import { EditorPane } from './EditorPane';
 import { TerminalPane } from './TerminalPane';
 
 // A dockview theme is just a class name holding its CSS variables. Ours maps them onto the
@@ -12,6 +14,12 @@ const WORKBENCH_THEME = { name: 'workbench', className: 'wb-dockview', dndPanelO
 
 const layoutKey = (workspaceId) => `workbench.layout.${workspaceId}`;
 const SAVE_DEBOUNCE_MS = 400;
+
+// Editor panels are keyed by the workspace they show, which both keeps them out of the terminal
+// reconcile below and means a workspace can only ever have the one.
+const EDITOR_PREFIX = 'editor:';
+const editorPanelId = (workspaceId) => EDITOR_PREFIX + workspaceId;
+const isEditorPanel = (panelId) => panelId.startsWith(EDITOR_PREFIX);
 
 /** The terminal area: a dockview layout whose panels are the workspace's terminals.
  *
@@ -76,8 +84,9 @@ export function TerminalLayout() {
     }
 
     // Panels for terminals that are gone — killed elsewhere, or not restored after a restart.
+    // Editor panels answer to nothing in the store, so they are not swept up here.
     for (const panel of [...dock.panels]) {
-      if (!tabs.some((t) => t.id === panel.id)) removeSilently(panel);
+      if (!isEditorPanel(panel.id) && !tabs.some((t) => t.id === panel.id)) removeSilently(panel);
     }
     for (const tab of tabs) {
       const existing = dock.getPanel(tab.id);
@@ -104,11 +113,35 @@ export function TerminalLayout() {
     });
   }
 
+  /** Show this workspace's editor, bringing the existing panel forward if it's already open. */
+  function addEditor() {
+    const workspaceId = state.activeWorkspaceId;
+    if (!dock || !workspaceId) return;
+    const existing = dock.getPanel(editorPanelId(workspaceId));
+    if (existing) {
+      existing.api.setActive();
+      return;
+    }
+    dock.addPanel({
+      id: editorPanelId(workspaceId),
+      component: 'editor',
+      title: 'editor',
+      params: { workspaceId },
+    });
+  }
+
   function onReady(event) {
     dock = event.api;
     event.api.onDidLayoutChange(saveLayout);
     event.api.onDidRemovePanel((panel) => {
       if (removingSilently.delete(panel.id)) return;
+      if (isEditorPanel(panel.id)) {
+        // Closing the panel is as explicit as it gets, so the instance goes too rather than
+        // holding its memory until the idle timeout notices. Reopening takes a few seconds and
+        // comes back to the same files: the editor's state lives in its user-data-dir.
+        api.stopEditor(panel.id.slice(EDITOR_PREFIX.length)).catch(() => {});
+        return;
+      }
       // Closing a panel closes the terminal behind it: the process is killed and the tab leaves
       // the store. A Claude session survives it — the conversation is pinned to a session id, so a
       // new tab in the same workspace can resume it.
@@ -118,6 +151,8 @@ export function TerminalLayout() {
   }
 
   createEffect(reconcile);
+  // defer: the count is non-zero only once something has actually asked.
+  createEffect(on(editorRequests, addEditor, { defer: true }));
 
   onCleanup(() => {
     clearTimeout(saveTimer);
@@ -134,6 +169,10 @@ export function TerminalLayout() {
         <TerminalPane tab={tab()} panelApi={panelProps.api} />
       </Show>
     );
+  }
+
+  function EditorPanel(panelProps) {
+    return <EditorPane workspaceId={panelProps.params.workspaceId} />;
   }
 
   function GroupActions(props) {
@@ -160,9 +199,12 @@ export function TerminalLayout() {
           }
         >
           <p>
-            No terminals open here.{' '}
+            Nothing open here.{' '}
             <button class="wb-btn" type="button" onClick={() => addTerminal()}>
-              Open one
+              Open a terminal
+            </button>{' '}
+            <button class="wb-btn" type="button" onClick={addEditor}>
+              Open the editor
             </button>
           </p>
         </Show>
@@ -174,7 +216,7 @@ export function TerminalLayout() {
     <div id="terminal-layout">
       <DockviewSolid
         theme={WORKBENCH_THEME}
-        components={{ terminal: TerminalPanel }}
+        components={{ terminal: TerminalPanel, editor: EditorPanel }}
         rightHeaderActionsComponent={GroupActions}
         watermarkComponent={Watermark}
         onReady={onReady}

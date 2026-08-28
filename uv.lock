@@ -376,6 +376,7 @@ dependencies = [
     { name = "hypercorn" },
     { name = "litestar", extra = ["jinja"] },
     { name = "tomli-w" },
+    { name = "websockets" },
 ]
 
 [package.dev-dependencies]
@@ -396,6 +397,7 @@ requires-dist = [
     { name = "hypercorn", specifier = "==0.18.0" },
     { name = "litestar", extras = ["jinja"], specifier = ">=2.24.0" },
     { name = "tomli-w", specifier = "==1.2.0" },
+    { name = "websockets", specifier = ">=17.0.1" },
 ]
 
 [package.metadata.requires-dev]

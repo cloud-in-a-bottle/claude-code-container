@@ -9,6 +9,7 @@ from litestar import patch
 from litestar import post
 from litestar.params import FromPath
 
+from server.editor import instances as editor_instances
 from server.git_remote import REF_RE
 from server.git_remote import RepoAccess
 from server.git_remote import repo_dir_name
@@ -216,5 +217,9 @@ async def remove_workspace(project_id: FromPath[str], name: FromPath[str]) -> Re
     for tab in tabs_for_workspace(workspace.id):
         _tabs.pop(tab.id, None)
         kill_tab(tab)
+    # Before the directory goes: an editor left running over a deleted workspace holds a GB of
+    # process for a folder that no longer exists.
+    await editor_instances.stop(workspace.id)
+    editor_instances.forget_workspace(workspace.id)
     delete_workspace(workspace)
     return Response(content={"ok": True})
