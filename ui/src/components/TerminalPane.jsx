@@ -204,6 +204,10 @@ export function TerminalPane(props) {
     // Dockview detaches a hidden panel's DOM, so a panel coming back has to measure itself again.
     const visSub = props.panelApi.onDidVisibilityChange((e) => e.isVisible && queueMicrotask(refit));
     const focusSub = props.panelApi.onDidActiveChange((e) => e.isActive && term.focus());
+    // Dockview activates a panel as it adds it, which is before this pane exists to hear about it.
+    // So a terminal that arrives already active -- a new workspace, a new tab, the panel a restored
+    // layout comes back on -- gets the keyboard here instead, and typing works without a click.
+    if (props.panelApi.isActive) term.focus();
     onCleanup(() => {
       sizeSub.dispose();
       visSub.dispose();
