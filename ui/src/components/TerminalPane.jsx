@@ -4,6 +4,7 @@ import '@xterm/xterm/css/xterm.css';
 import { Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
 
 import * as api from '../api';
+import { createLinkSupport } from '../links';
 import { filterOsc52Noise, handleOsc52 } from '../osc52';
 import { forgetTab, state, theme } from '../store';
 import { xtermTheme } from '../themes';
@@ -51,6 +52,7 @@ export function TerminalPane(props) {
   let lastDimensions = { cols: 80, rows: 24 };
   const [busy, setBusy] = createSignal('');
   const [notice, setNotice] = createSignal('');
+  const [linkHint, setLinkHint] = createSignal('');
   let noticeTimer = null;
 
   function sendResize() {
@@ -183,14 +185,18 @@ export function TerminalPane(props) {
   }
 
   onMount(() => {
+    const links = createLinkSupport(host, setLinkHint);
+    onCleanup(links.dispose);
     term = new Terminal({
       cursorBlink: true,
       fontSize: 14,
       scrollback: SCROLLBACK_LINES,
       theme: xtermTheme(theme()),
+      linkHandler: links.linkHandler,
     });
     fit = new FitAddon();
     term.loadAddon(fit);
+    term.loadAddon(links.addon);
     term.open(host);
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown' && e.metaKey && e.key === 'c' && copySelection()) return false;
@@ -247,8 +253,8 @@ export function TerminalPane(props) {
   return (
     <div class="terminal-panel">
       <div class="term" ref={host} />
-      <Show when={notice()}>
-        <div class="term-notice">{notice()}</div>
+      <Show when={notice() || linkHint()}>
+        <div class="term-notice">{notice() || linkHint()}</div>
       </Show>
       <Show when={busy()}>
         <div class="busy-overlay">
