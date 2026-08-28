@@ -39,6 +39,7 @@ from server.routes.tabs import list_tabs
 from server.routes.tabs import terminal_ws
 from server.routes.ui import get_ui_settings
 from server.routes.ui import update_ui_settings
+from server.signals import survive_hangups
 from server.tabs import persist_tabs_periodically
 from server.tabs import restore_tabs
 from server.ui_settings import load_ui_settings
@@ -98,6 +99,8 @@ app = Litestar(
 
 
 def main() -> None:
+    # Before the event loop and its executor threads exist, so they inherit the blocked signal.
+    survive_hangups()
     cfg = hypercorn.config.Config()
     cfg.bind = [f"0.0.0.0:{PORT}"]
     cfg.accesslog = "-"

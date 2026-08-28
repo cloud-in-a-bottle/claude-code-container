@@ -16,6 +16,7 @@ from server import tab_store
 from server import tabs as tabs_module
 from server.projects import workspaces
 from server.projects.workspaces import Workspace
+from server.signals import survive_hangups
 from server.tabs import ServerTab
 from server.tabs import _tabs
 
@@ -206,3 +207,31 @@ def test_a_workspace_with_no_conversation_starts_a_fresh_one(
     assert created[0]["session_id"] not in ("", _EXISTING_SESSION)
     command = created[0]["command"][-1]
     assert command.index("--session-id") < command.index("--resume")
+def test_tabs_can_still_be_hung_up_after_the_server_makes_itself_immune(workbench_home: Path) -> None:
+    """survive_hangups() blocks SIGHUP, and a blocked signal survives exec.
+
+    Without the reset in the child, every terminal would inherit that block and kill_tab() could
+    never end one again — so the immunity and the reset have to be tested together.
+    """
+    survive_hangups()
+
+    async def spawn_then_kill() -> int:
+        tab = await tabs_module.create_server_tab(
+            command=["bash", "-c", "sleep 300 & sleep 300"],
+            cwd=str(workbench_home),
+            label="t",
+        )
+        pgid = os.getpgid(tab.proc.pid)
+        tabs_module.kill_tab(tab)
+        return pgid
+
+    pgid = asyncio.run(spawn_then_kill())
+
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.05)
+    raise AssertionError("the tab ignored SIGHUP: the child inherited the server's signal mask")
