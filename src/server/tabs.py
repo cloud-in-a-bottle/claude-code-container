@@ -18,6 +18,7 @@ import attr
 from litestar import WebSocket
 
 from server.claude_sessions import latest_session_id
+from server.claude_trust import trust_dir
 from server.config import HOME
 from server.projects.workspaces import Workspace
 from server.projects.workspaces import parse_workspace_id
@@ -192,6 +193,12 @@ async def create_server_tab(
     _tab_counter += 1
     tab_id = tab_id or secrets.token_urlsafe(8)
     tab_label = label or f"term {_tab_counter}"
+
+    # Every path that runs Claude funnels through here -- a new tab, a restore, the script that
+    # builds a workspace -- so this is the one place that has to vouch for the directory. Shell
+    # tabs are left alone: nothing asks them the question.
+    if kind == CLAUDE and cwd:
+        trust_dir(cwd)
 
     master_fd, slave_fd = pty.openpty()
     set_winsize(master_fd, 24, 80)

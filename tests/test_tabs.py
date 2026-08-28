@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from server import claude_sessions
+from server import claude_trust
 from server import tab_store
 from server import tabs as tabs_module
 from server.projects import workspaces
@@ -206,3 +207,24 @@ def test_a_workspace_with_no_conversation_starts_a_fresh_one(
     assert created[0]["session_id"] not in ("", _EXISTING_SESSION)
     command = created[0]["command"][-1]
     assert command.index("--session-id") < command.index("--resume")
+
+
+def test_a_claude_tab_vouches_for_its_directory(workbench_home: Path) -> None:
+    """Otherwise the first Claude in a new workspace opens onto the trust dialog, whose default
+    answer is "No, exit" — one keypress from a bare shell instead of a conversation."""
+
+    async def open_tab() -> None:
+        await tabs_module.create_server_tab(command=["true"], cwd=str(workbench_home), kind=tab_store.CLAUDE)
+
+    asyncio.run(open_tab())
+    assert claude_trust.is_trusted(workbench_home)
+
+
+def test_a_shell_tab_does_not(workbench_home: Path) -> None:
+    """Nothing asks a bash tab the question, so answering it on the user's behalf isn't ours to do."""
+
+    async def open_tab() -> None:
+        await tabs_module.create_server_tab(command=["true"], cwd=str(workbench_home), kind=tab_store.SHELL)
+
+    asyncio.run(open_tab())
+    assert not claude_trust.is_trusted(workbench_home)
