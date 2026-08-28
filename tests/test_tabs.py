@@ -207,6 +207,8 @@ def test_a_workspace_with_no_conversation_starts_a_fresh_one(
     assert created[0]["session_id"] not in ("", _EXISTING_SESSION)
     command = created[0]["command"][-1]
     assert command.index("--session-id") < command.index("--resume")
+
+
 def test_tabs_can_still_be_hung_up_after_the_server_makes_itself_immune(workbench_home: Path) -> None:
     """survive_hangups() blocks SIGHUP, and a blocked signal survives exec.
 

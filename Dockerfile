@@ -78,4 +78,10 @@ RUN date -u +%Y-%m-%dT%H:%M:%SZ > /app/.image-stamp
 
 WORKDIR /root
 EXPOSE 5000
-ENTRYPOINT ["/usr/bin/tini", "--", "/app/entrypoint.sh"]
+# SIGHUP is ignored before tini is exec'd, and SIG_IGN survives exec, so pid 1 inherits it.
+# This tini installs no SIGHUP handler of its own (its SigCgt is 0), so without this a `kill -HUP 1`
+# from anything inside the container kills pid 1 by default action and takes every terminal in
+# every workspace with it -- and this container runs Claude, the user's shells and its own test
+# suite by design. Tab processes put the default back before exec (see reset_child_signals), so
+# terminals can still be hung up normally.
+ENTRYPOINT ["/bin/sh", "-c", "trap '' HUP; exec /usr/bin/tini -- /app/entrypoint.sh"]
