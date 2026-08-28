@@ -74,6 +74,24 @@ seed_checkouts() {
     echo "[entrypoint] checkouts ready"
 }
 
+# The global instructions Claude reads in every workspace. Symlinked, not copied, so an app
+# update carries the new text without a migration step. Same replace-what's-there rule as the
+# skills below: $HOME persists across rebuilds, so a stale copy would otherwise pin a workbench
+# to whatever it first saw. ~/.claude/CLAUDE.local.md is the user's half — the bundled file
+# imports it, and it is created empty so the import never dangles.
+mkdir -p "$HOME/.claude"
+touch "$HOME/.claude/CLAUDE.local.md"
+# A real file already sitting there predates the bundled one and is the user's own writing, so
+# fold it into their half instead of dropping it. Appending means this is safe to repeat and
+# doesn't care whether CLAUDE.local.md already had content.
+if [ -f "$HOME/.claude/CLAUDE.md" ] && [ ! -L "$HOME/.claude/CLAUDE.md" ]; then
+    echo "[entrypoint] moving your existing ~/.claude/CLAUDE.md into ~/.claude/CLAUDE.local.md"
+    cat "$HOME/.claude/CLAUDE.md" >> "$HOME/.claude/CLAUDE.local.md"
+    rm -f "$HOME/.claude/CLAUDE.md"
+fi
+# -n so an existing symlink is replaced rather than followed.
+ln -sfn /app/claude-home/CLAUDE.md "$HOME/.claude/CLAUDE.md"
+
 # Link every bundled skill into the user's skill dir, replacing whatever is already there. $HOME
 # persists across rebuilds, so without the replace an old link (or a directory shadowing the name)
 # would pin an existing workbench to whatever it first saw. Bundled skill names are therefore
