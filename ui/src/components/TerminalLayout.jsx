@@ -18,6 +18,12 @@ const SAVE_DEBOUNCE_MS = 400;
 // Editor panels are keyed by the workspace they show, which both keeps them out of the terminal
 // reconcile below and means a workspace can only ever have the one.
 const EDITOR_PREFIX = 'editor:';
+// dockview detaches a hidden panel's DOM by default, and re-attaching an <iframe> anywhere else in
+// the document reloads it — so every switch between the terminal tab and the editor tab silently
+// restarted VS Code, losing the cursor, unsaved buffers and any terminal running inside it. The
+// 'always' renderer keeps the panel in one stable overlay container instead, which is what this
+// option exists for. Terminals don't need it: xterm re-measures itself when it comes back.
+const EDITOR_RENDERER = 'always';
 const editorPanelId = (workspaceId) => EDITOR_PREFIX + workspaceId;
 const isEditorPanel = (panelId) => panelId.startsWith(EDITOR_PREFIX);
 
@@ -86,7 +92,12 @@ export function TerminalLayout() {
     // Panels for terminals that are gone — killed elsewhere, or not restored after a restart.
     // Editor panels answer to nothing in the store, so they are not swept up here.
     for (const panel of [...dock.panels]) {
-      if (!isEditorPanel(panel.id) && !tabs.some((t) => t.id === panel.id)) removeSilently(panel);
+      if (isEditorPanel(panel.id)) {
+        // A layout saved before EDITOR_RENDERER existed brings its editor back on the default one.
+        if (panel.api.renderer !== EDITOR_RENDERER) panel.api.setRenderer(EDITOR_RENDERER);
+        continue;
+      }
+      if (!tabs.some((t) => t.id === panel.id)) removeSilently(panel);
     }
     for (const tab of tabs) {
       const existing = dock.getPanel(tab.id);
@@ -126,6 +137,7 @@ export function TerminalLayout() {
       id: editorPanelId(workspaceId),
       component: 'editor',
       title: 'editor',
+      renderer: EDITOR_RENDERER,
       params: { workspaceId },
     });
   }

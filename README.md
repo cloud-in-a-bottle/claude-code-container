@@ -349,6 +349,20 @@ are the exception: tsserver and friends rebuild per session regardless, while
 in a fresh clone, exactly as they would be for a fresh `git clone` in a
 terminal.
 
+### The panel is rendered with dockview's `always` renderer
+
+Not a detail to tidy away: dockview detaches a hidden panel's DOM by default, and
+re-attaching an `<iframe>` anywhere else in the document makes the browser reload
+it. With the default renderer, every switch between the terminal tab and the
+editor tab — and every drag into a split — silently restarted VS Code, losing the
+cursor, unsaved buffers and anything running in its terminal. For about five
+seconds afterwards hovers and other language features were simply dead, which is
+what it looked like from the outside.
+
+`renderer: 'always'` keeps the panel in one stable overlay container instead,
+which is what the option is for. Terminals don't need it; xterm re-measures
+itself when it comes back.
+
 ### How it's served
 
 code-server listens on a unix socket with `--auth none`, and the workbench
