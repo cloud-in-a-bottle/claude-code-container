@@ -14,6 +14,7 @@ from litestar.testing import TestClient
 from server import app as srv
 from server import config
 from server import ui_settings
+from server.editor import extensions
 from server.editor import instances
 from server.editor import paths
 from server.editor import proxy
@@ -303,10 +304,14 @@ def test_starting_the_same_workspace_twice_reuses_one_instance(
     async def fake_install() -> Path:
         return workbench_home / "code-server"
 
+    async def fake_extensions(binary: Path) -> None:
+        return None
+
     async def never_reaped(instance: EditorInstance) -> None:
         return None
 
     monkeypatch.setattr(instances, "ensure_installed", fake_install)
+    monkeypatch.setattr(instances, "ensure_default_extensions", fake_extensions)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
     monkeypatch.setattr(instances, "_wait_until_ready", fake_ready)
     monkeypatch.setattr(instances, "_reap", never_reaped)
@@ -365,3 +370,124 @@ def test_a_fresh_install_takes_the_workbench_s_current_theme(workbench_home: Pat
         pass  # startup seeds the shared config and syncs the theme
     written = json.loads(settings.shared_settings_path().read_text())
     assert written["workbench.colorTheme"] == settings.THEME_NAMES["solarized-dark"]
+
+
+# ---- the extensions a new workbench comes with -------------------------------------------------
+
+
+def _fake_installer(monkeypatch: pytest.MonkeyPatch, attempted: list[str], *, succeeds: list[bool]) -> None:
+    async def fake_install(binary: Path, extension: extensions.DefaultExtension) -> bool:
+        attempted.append(extension.pinned)
+        return succeeds[0]
+
+    monkeypatch.setattr(extensions, "_install", fake_install)
+
+
+def test_python_support_is_installed_without_being_asked_for() -> None:
+    """A workspace is a repo the user cloned to work on, not an empty editor to set up first."""
+    ids = [e.extension_id for e in extensions.DEFAULT_EXTENSIONS]
+    assert "ms-python.python" in ids
+    assert "meta.pyrefly" in ids
+    assert "charliermarsh.ruff" in ids
+
+
+def test_pylance_is_not_shipped_and_nothing_waits_for_it() -> None:
+    """Pylance is licensed to Microsoft's own builds and is absent from Open VSX, so it cannot be
+    installed here at all. Leaving python.languageServer at its default points the Python extension
+    at it anyway, and it prompts about the missing install on every Python file."""
+    assert "ms-python.vscode-pylance" not in [e.extension_id for e in extensions.DEFAULT_EXTENSIONS]
+    assert settings.DEFAULT_SETTINGS["python.languageServer"] == "None"
+
+
+def test_every_default_extension_is_pinned() -> None:
+    """extensions.autoUpdate is off, so an unpinned install freezes on whatever was latest the day
+    the container first started. The pin is what makes that a decision instead of a timestamp."""
+    assert settings.DEFAULT_SETTINGS["extensions.autoUpdate"] is False
+    for extension in extensions.DEFAULT_EXTENSIONS:
+        assert extension.version
+        assert extension.pinned == f"{extension.extension_id}@{extension.version}"
+
+
+def test_the_python_formatter_is_one_of_the_extensions_that_gets_installed() -> None:
+    """Naming a formatter that isn't installed fails on save with a dialog and no formatting."""
+    python_settings = settings.DEFAULT_SETTINGS["[python]"]
+    assert isinstance(python_settings, dict)
+    formatter = python_settings["editor.defaultFormatter"]
+    assert formatter in [e.extension_id for e in extensions.DEFAULT_EXTENSIONS]
+
+
+def test_the_defaults_are_installed_once_and_not_again(workbench_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    attempted: list[str] = []
+    _fake_installer(monkeypatch, attempted, succeeds=[True])
+    binary = workbench_home / "code-server"
+
+    asyncio.run(extensions.ensure_default_extensions(binary))
+    assert attempted == [e.pinned for e in extensions.DEFAULT_EXTENSIONS]
+
+    attempted.clear()
+    asyncio.run(extensions.ensure_default_extensions(binary))
+    assert attempted == []
+
+
+def test_an_extension_that_could_not_be_installed_is_tried_again(
+    workbench_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Open VSX being unreachable for one start must not cost the workspace Python support for
+    good, so only what really installed is written down."""
+    attempted: list[str] = []
+    succeeds = [False]
+    _fake_installer(monkeypatch, attempted, succeeds=succeeds)
+    binary = workbench_home / "code-server"
+
+    asyncio.run(extensions.ensure_default_extensions(binary))
+    assert attempted == [e.pinned for e in extensions.DEFAULT_EXTENSIONS]
+    assert extensions.already_installed() == set()
+
+    attempted.clear()
+    succeeds[0] = True
+    asyncio.run(extensions.ensure_default_extensions(binary))
+    assert attempted == [e.pinned for e in extensions.DEFAULT_EXTENSIONS]
+
+
+def test_an_extension_the_user_uninstalled_is_not_forced_back(
+    workbench_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What has been installed before is read off the record, never off the extensions directory.
+    Probing the directory would undo the Extensions panel's uninstall button on the next start."""
+    marker = extensions.installed_marker_path()
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(json.dumps([e.pinned for e in extensions.DEFAULT_EXTENSIONS]))
+
+    attempted: list[str] = []
+    _fake_installer(monkeypatch, attempted, succeeds=[True])
+    asyncio.run(extensions.ensure_default_extensions(workbench_home / "code-server"))
+
+    assert attempted == []
+    assert not paths.EXTENSIONS_DIR.exists()
+
+
+def test_bumping_a_pin_installs_the_new_version(workbench_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The record is keyed by version, so editing DEFAULT_EXTENSIONS is all an upgrade takes."""
+    marker = extensions.installed_marker_path()
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(json.dumps([f"{e.extension_id}@0.0.0" for e in extensions.DEFAULT_EXTENSIONS]))
+
+    attempted: list[str] = []
+    _fake_installer(monkeypatch, attempted, succeeds=[True])
+    asyncio.run(extensions.ensure_default_extensions(workbench_home / "code-server"))
+
+    assert attempted == [e.pinned for e in extensions.DEFAULT_EXTENSIONS]
+
+
+def test_a_marker_file_that_is_not_readable_does_not_stop_an_editor_starting(
+    workbench_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marker = extensions.installed_marker_path()
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("{ not json")
+
+    attempted: list[str] = []
+    _fake_installer(monkeypatch, attempted, succeeds=[True])
+    asyncio.run(extensions.ensure_default_extensions(workbench_home / "code-server"))
+
+    assert attempted == [e.pinned for e in extensions.DEFAULT_EXTENSIONS]

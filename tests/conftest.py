@@ -59,6 +59,7 @@ _STATE_PATHS: tuple[tuple[Any, str, str], ...] = (
     (editor_paths, "INSTALL_DIR", ".workbench/vscode/install"),
     (editor_paths, "SHARED_USER_DIR", ".workbench/vscode/user"),
     (editor_paths, "EXTENSIONS_DIR", ".workbench/vscode/extensions"),
+    (editor_paths, "CLI_DATA_DIR", ".workbench/vscode/cli"),
     (editor_paths, "INSTANCES_DIR", ".workbench/vscode/instances"),
     (editor_paths, "CONFIG_PATH", ".workbench/vscode/config.yaml"),
     # Not $HOME state — sockets live in /tmp — but redirected all the same, so a test can't reach
