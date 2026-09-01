@@ -27,6 +27,20 @@ DEFAULT_SETTINGS = {
     # With chat off the secondary sidebar has nothing left to hold, and it opens by default as an
     # empty strip down the side of the panel.
     "workbench.secondarySideBar.defaultVisibility": "hidden",
+    # Pylance is licensed to Microsoft's own builds and is not on Open VSX, so left to itself the
+    # Python extension looks for a language server that cannot be installed here and prompts about
+    # it on every Python file. Pyrefly ships instead -- see extensions.py for why that one.
+    "python.languageServer": "None",
+    # Interpreter discovery runs per workspace, since globalStorage is not one of SHARED_ENTRIES,
+    # so every workspace pays for it separately. This is where a workspace's venv is if it has one,
+    # which saves the search in the common case.
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+    "[python]": {
+        "editor.defaultFormatter": "charliermarsh.ruff",
+        # Deliberately off: a workspace is whatever repo the user cloned, and reformatting one that
+        # doesn't use Ruff turns the first save of an unrelated edit into a whole-file diff.
+        "editor.formatOnSave": False,
+    },
     "telemetry.telemetryLevel": "off",
     "update.mode": "none",
     "extensions.autoCheckUpdates": False,

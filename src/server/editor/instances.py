@@ -11,6 +11,7 @@ import httpx
 
 from server.editor import paths
 from server.editor import settings
+from server.editor.extensions import ensure_default_extensions
 from server.editor.install import ensure_installed
 from server.projects.workspaces import Workspace
 from server.remote_services import get_anthropic_key
@@ -185,6 +186,7 @@ async def start(workspace: Workspace) -> EditorInstance:
             return existing
 
         binary = await ensure_installed()
+        await ensure_default_extensions(binary)
         await _evict_until_under_cap()
 
         data_dir = user_data_dir(workspace.id)

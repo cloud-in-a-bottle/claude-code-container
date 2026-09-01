@@ -16,6 +16,9 @@ INSTALL_DIR = VSCODE_DIR / "install"
 SHARED_USER_DIR = VSCODE_DIR / "user"
 # One extensions dir for all instances: installing an extension once makes it available everywhere.
 EXTENSIONS_DIR = VSCODE_DIR / "extensions"
+# The user-data-dir for the `code-server --install-extension` runs in extensions.py. Separate from
+# the instance ones, which are keyed by workspace: installing an extension belongs to no workspace.
+CLI_DATA_DIR = VSCODE_DIR / "cli"
 # One user-data-dir per workspace. Sharing a single one across concurrent instances makes them
 # collide over workspaceStorage and the `code` CLI's IPC socket, so they each get their own.
 INSTANCES_DIR = VSCODE_DIR / "instances"

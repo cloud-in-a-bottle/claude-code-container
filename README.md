@@ -194,12 +194,40 @@ Instances are **per workspace and separate**, so two workspaces of the same proj
 ```
 ~/.workbench/vscode/user/settings.json       shared: settings, keybindings, snippets
 ~/.workbench/vscode/extensions/              shared: installed extensions
+~/.workbench/vscode/default-extensions.json  shared: which defaults have been installed once
 ~/.workbench/vscode/instances/<digest>/      per workspace: layout, open editors, per-extension state
 ```
 
 The shared files are symlinked into each instance's user-data-dir. VS Code resolves the link before it writes, so changing a setting *from inside the editor* lands in the shared file and reaches every other workspace — which is the point. The per-workspace directories are separate because sharing one makes concurrent instances collide over `workspaceStorage`.
 
 Extensions come from [Open VSX](https://open-vsx.org/) rather than Microsoft's marketplace, which is a licensing constraint of every non-Microsoft VS Code build, not a choice here. Most things are there (including `Anthropic.claude-code`); Microsoft-licensed ones like Pylance are not.
+
+### Python works out of the box
+
+A workspace is a repo you cloned to work on, so the editor shouldn't need setting up first. Three extensions are installed into the shared directory the first time any editor starts, pinned in `editor/extensions.py`:
+
+| | |
+|---|---|
+| `ms-python.python` | interpreter selection, the test explorer, the debugger. An extension pack, so `ms-python.debugpy` and `ms-python.vscode-python-envs` arrive with it |
+| `meta.pyrefly` | the language server: completions, go-to-definition, type errors |
+| `charliermarsh.ruff` | lint and format |
+
+The install is the one best-effort thing in the editor code — Open VSX being unreachable costs you Python support, not the editor. Only what actually installed is written to `default-extensions.json`, so a failed start is retried on the next one. That file, rather than the contents of the extensions directory, is also what stops a default you *uninstalled* from coming back every restart.
+
+**Pylance is the notable absence, and it can't be fixed here.** It's [licensed to Microsoft's own builds](https://github.com/microsoft/pylance-release/blob/main/FAQ.md#can-i-load-pylance-in-code--oss), so it isn't published to Open VSX and refuses to activate under code-server. Since `ms-python.python` names it in its extension pack and looks for it by default, `python.languageServer` is pinned to `"None"` — otherwise every Python file prompts about an install that cannot succeed.
+
+[Pyrefly](https://pyrefly.org/) stands in for it. Pylance is Pyright plus a closed-source layer, and Pyright's open forks are the obvious substitutes, but the choice here turned on what a *cold start* costs: instances are capped at two and time out after 30 minutes, so starting a language server is routine rather than a once-a-day event. Measured against this repo, in this container:
+
+| | pyrefly | basedpyright | jedi |
+|---|---|---|---|
+| cold start → first diagnostics | **0.23s** | 3.01s | ~1.0s (syntax only) |
+| second file, warm | **0.08s** | 0.80s | 1.00s |
+| peak RSS | **104 MB** | 326 MB | 63 MB |
+| type checking | yes | yes | none |
+
+All three resolve go-to-definition across the repo, into site-packages and into the stdlib, including attrs-generated attributes — that part isn't the differentiator. Pyrefly is a Rust binary shipped inside the vsix, so there's nothing to fetch on activation, and it reads `[tool.mypy]` out of `pyproject.toml`, which is what this repo's pre-commit enforces.
+
+Ruff is set as the Python formatter but **not** as format-on-save: a workspace is whatever repo you cloned, and reformatting one that doesn't use Ruff would turn the first save of an unrelated edit into a whole-file diff.
 
 The colour scheme follows the workbench's own picker, live and with no reload.
 
@@ -211,7 +239,7 @@ The container has 4 GB and one core, and the Claude sessions are the point of th
 - **Closing the panel stops the instance**, and an instance nobody is attached to shuts itself down after 30 minutes (`--idle-timeout-seconds`). Without that, VS Code holds its extension host for *three hours* after a disconnect.
 - **The bundled Copilot is off** (`chat.disableAIFeatures`). It otherwise spawns a ~200 MB language server per instance, signed out and unasked.
 
-Roughly, measured in this container: ~200 MB idle, 400 MB–1 GB with a browser attached, ~5s to open, and ~2k inotify watches per instance out of a host-wide budget of ~62k that a container can't raise (hence the `files.watcherExclude` defaults). There's no project-wide index to go cold — search is ripgrep on demand — so a brand-new workspace opens as fast as an old one. Language servers are the exception: tsserver and friends rebuild per session regardless, while `rust-analyzer`'s and JDT's caches live in the workspace and are genuinely cold in a fresh clone, exactly as they would be for a fresh `git clone` in a terminal.
+Roughly, measured in this container: ~200 MB idle, 400 MB–1 GB with a browser attached, ~5s to open, and ~2k inotify watches per instance out of a host-wide budget of ~62k that a container can't raise (hence the `files.watcherExclude` defaults). There's no project-wide index to go cold — search is ripgrep on demand — so a brand-new workspace opens as fast as an old one. Language servers are the exception: tsserver and friends rebuild per session regardless, while `rust-analyzer`'s and JDT's caches live in the workspace and are genuinely cold in a fresh clone, exactly as they would be for a fresh `git clone` in a terminal. Python is deliberately not one of these — Pyrefly holds no index at all and re-derives what it needs from whatever you open, which is why a fresh workspace costs a fifth of a second rather than a rebuild.
 
 ### The panel is rendered with dockview's `always` renderer
 
