@@ -36,22 +36,44 @@ export function TerminalLayout() {
   let dock;
   let mountedWorkspace = '';
   let saveTimer;
+  // Set while a workspace's saved layout is still waiting on its terminals to arrive. The
+  // reconcile below sweeps panels the store doesn't know about, so restoring before the tabs land
+  // would throw the layout straight back away.
+  let awaitingTabs = false;
   // Set just before a new tab reaches the store, so the reconcile that follows can put its panel
   // in the group whose + was clicked rather than the default one.
   let pendingPlacement = null;
   // Panels we remove ourselves; their terminals are already gone, so closing must not kill twice.
   const removingSilently = new Set();
 
+  function writeLayout(workspaceId) {
+    try {
+      localStorage.setItem(layoutKey(workspaceId), JSON.stringify(dock.toJSON()));
+    } catch (_) {
+      /* a layout is not worth failing over */
+    }
+  }
+
   function saveLayout() {
-    if (!dock || !mountedWorkspace) return;
+    // Mid-switch the dock is empty or half-built; saving then would write that over the layout we
+    // are about to restore.
+    if (!dock || !mountedWorkspace || awaitingTabs) return;
+    // Pinned now rather than read when the timer fires, so a switch in between can't file these
+    // changes under the workspace that comes next.
+    const workspaceId = mountedWorkspace;
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      try {
-        localStorage.setItem(layoutKey(mountedWorkspace), JSON.stringify(dock.toJSON()));
-      } catch (_) {
-        /* a layout is not worth failing over */
-      }
-    }, SAVE_DEBOUNCE_MS);
+    saveTimer = setTimeout(() => writeLayout(workspaceId), SAVE_DEBOUNCE_MS);
+  }
+
+  /** Put back the arrangement this workspace was left in, if it has one. */
+  function restoreLayout(workspaceId) {
+    try {
+      const saved = localStorage.getItem(layoutKey(workspaceId));
+      if (saved) dock.fromJSON(JSON.parse(saved));
+    } catch (_) {
+      // A layout that won't load isn't worth keeping.
+      localStorage.removeItem(layoutKey(workspaceId));
+    }
   }
 
   function removeSilently(panel) {
@@ -76,17 +98,21 @@ export function TerminalLayout() {
     if (!dock) return;
 
     if (workspaceId !== mountedWorkspace) {
+      // Whatever the outgoing workspace was left looking like, write it now: the teardown below
+      // empties the dock, so a debounced save would have nothing left to record.
+      clearTimeout(saveTimer);
+      if (mountedWorkspace && !awaitingTabs) writeLayout(mountedWorkspace);
       for (const panel of [...dock.panels]) removeSilently(panel);
       mountedWorkspace = workspaceId;
-      if (workspaceId) {
-        try {
-          const saved = localStorage.getItem(layoutKey(workspaceId));
-          if (saved) dock.fromJSON(JSON.parse(saved));
-        } catch (_) {
-          // A layout that won't load isn't worth keeping.
-          localStorage.removeItem(layoutKey(workspaceId));
-        }
-      }
+      awaitingTabs = Boolean(workspaceId);
+    }
+
+    if (awaitingTabs) {
+      // The store empties `tabs` the moment a workspace is picked and fills them in when the
+      // server answers. Lay nothing out until then.
+      if (tabs.length === 0) return;
+      awaitingTabs = false;
+      restoreLayout(workspaceId);
     }
 
     // Panels for terminals that are gone — killed elsewhere, or not restored after a restart.
