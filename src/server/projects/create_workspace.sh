@@ -8,7 +8,10 @@
 #   WS_REF           branch/tag/sha to check out. The server normally fills this in with the
 #                    project's configured default branch, or the branch the remote's HEAD points
 #                    at right now; blank falls back to whatever the mirror's HEAD says.
+#   WS_BRANCH        optional new branch to create and switch to after the checkout, so an
+#                    automated run starts on the branch its PR will come from
 #   WS_SETUP         optional one-off setup command, run in the workspace before Claude
+#   WS_PROMPT        optional opening prompt for Claude; blank starts an empty conversation
 #   WS_GITHUB_TOKEN  optional transient token, used for network git only and never written to disk
 #   CLAUDE_BIN, CLAUDE_SESSION_ID
 #
@@ -76,6 +79,15 @@ if [ -n "${WS_REF:-}" ]; then
         || echo "[workbench] checkout of $WS_REF failed; staying on the default branch." >&2
 fi
 
+# A run that is going to open a PR starts on its own branch, so nothing it does can land on the
+# branch it was cloned from. `-b` first, then a plain checkout, so re-running over a workspace
+# where the branch already exists rejoins it instead of failing.
+if [ -n "${WS_BRANCH:-}" ]; then
+    echo "[workbench] switching to branch $WS_BRANCH"
+    git checkout -b "$WS_BRANCH" 2>/dev/null || git checkout "$WS_BRANCH" \
+        || echo "[workbench] could not switch to $WS_BRANCH; staying on the current branch." >&2
+fi
+
 if [ -n "${WS_SETUP:-}" ]; then
     echo
     echo "[workbench] running project setup: $WS_SETUP"
@@ -83,11 +95,19 @@ if [ -n "${WS_SETUP:-}" ]; then
 fi
 
 echo
+# An opening prompt, when there is one, is passed positionally so the conversation starts already
+# working on it. The array keeps an unset WS_PROMPT from becoming an empty argument, which claude
+# would read as a blank prompt rather than as no prompt at all.
+CLAUDE_PROMPT_ARGS=()
+if [ -n "${WS_PROMPT:-}" ]; then
+    CLAUDE_PROMPT_ARGS=("$WS_PROMPT")
+fi
+
 # Create the pinned session, or rejoin it if a crashed earlier attempt already made it -- claude
 # rejects --session-id for an id that exists.
 for _i in 1 2 3; do
-    { "${CLAUDE_BIN}" --session-id "${CLAUDE_SESSION_ID}" --dangerously-skip-permissions ||
-        "${CLAUDE_BIN}" --resume "${CLAUDE_SESSION_ID}" --dangerously-skip-permissions; } && break
+    { "${CLAUDE_BIN}" --session-id "${CLAUDE_SESSION_ID}" --dangerously-skip-permissions "${CLAUDE_PROMPT_ARGS[@]}" ||
+        "${CLAUDE_BIN}" --resume "${CLAUDE_SESSION_ID}" --dangerously-skip-permissions "${CLAUDE_PROMPT_ARGS[@]}"; } && break
     sleep 1
 done
 exec bash -l

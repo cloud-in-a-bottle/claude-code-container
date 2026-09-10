@@ -14,12 +14,21 @@ CREATE_WORKSPACE_SCRIPT = APP_DIR / "projects" / "create_workspace.sh"
 
 
 async def start_workspace_tab(
-    project: Project, workspace: Workspace, ref: str = "", github_token: str = ""
+    project: Project,
+    workspace: Workspace,
+    ref: str = "",
+    github_token: str = "",
+    branch: str = "",
+    prompt: str = "",
 ) -> ServerTab:
     """Open the tab that builds a fresh workspace and then hands over to Claude.
 
     kind=CLAUDE even though the command is a bootstrap script: a restore must re-enter the
     conversation in the finished workspace, never run the clone a second time.
+
+    `branch` and `prompt` are what an automated run adds over a hand-made workspace: a branch to
+    work on, and an opening message so the conversation starts already doing the work. Both are
+    empty for a workspace someone created themselves, which then opens an idle Claude as before.
     """
     session_id = new_session_id()
     env = {
@@ -27,7 +36,9 @@ async def start_workspace_tab(
         "WS_REPO": project.repo_url,
         "WS_MIRROR": str(mirror_path(project.id)),
         "WS_REF": ref,
+        "WS_BRANCH": branch,
         "WS_SETUP": project.setup,
+        "WS_PROMPT": prompt,
         "CLAUDE_BIN": shutil.which("claude") or "claude",
         "CLAUDE_SESSION_ID": session_id,
     }

@@ -14,6 +14,7 @@ from server.config import PORT
 from server.editor import instances as editor_instances
 from server.editor.settings import apply_theme
 from server.editor.settings import ensure_shared_config
+from server.linear.reaper import reap_periodically
 from server.projects.seed import seed_projects
 from server.remote_services import refresh_gh_auth_periodically
 from server.remote_services import seed_gh_auth
@@ -24,6 +25,7 @@ from server.routes.editor import list_editors
 from server.routes.editor import start_editor
 from server.routes.editor import stop_editor
 from server.routes.images import create_pasted_image
+from server.routes.linear import linear_webhook
 from server.routes.open_workspace import open_workspace
 from server.routes.pages import health
 from server.routes.pages import index
@@ -62,6 +64,8 @@ async def _on_startup() -> None:
     asyncio.create_task(persist_tabs_periodically())  # noqa: RUF006
     # gh's token is short-lived, so keep re-minting it for as long as the workbench runs.
     asyncio.create_task(refresh_gh_auth_periodically(gh_refresh_delay))  # noqa: RUF006
+    # Delete the workspace behind a Linear run once its PR has merged.
+    asyncio.create_task(reap_periodically())  # noqa: RUF006
 
 
 async def _on_shutdown() -> None:
@@ -88,6 +92,7 @@ app = Litestar(
         kick_tab_client,
         delete_tab,
         open_workspace,
+        linear_webhook,
         create_pasted_image,
         list_editors,
         start_editor,

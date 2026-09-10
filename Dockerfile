@@ -61,7 +61,10 @@ COPY .dockerignore .gitignore .pre-commit-config.yaml Dockerfile ./
 COPY services/ ./services/
 COPY skills/ ./skills/
 COPY claude-home/ ./claude-home/
-RUN chmod +x /app/entrypoint.sh
+# `linear` goes on PATH for every terminal: a Claude working a Linear issue posts back to the issue
+# with it, and it needs no credentials of its own because latchkey injects them.
+COPY bin/ ./bin/
+RUN chmod +x /app/entrypoint.sh && install -m 0755 /app/bin/linear /usr/local/bin/linear
 
 # The app. `uv sync` installs the project editable, so it points at /app/src rather than copying
 # it, and the server serves its templates and static files from there.

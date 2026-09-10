@@ -13,6 +13,7 @@ from server import app as srv
 from server import git_remote
 from server.projects import launch
 from server.projects import store
+from server.projects import teardown
 from server.projects import workspaces
 from server.projects.workspaces import Workspace
 from server.routes import projects as project_routes
@@ -459,7 +460,7 @@ def test_delete_workspace_kills_its_tabs(workbench_home: Path, monkeypatch: pyte
     # Spied rather than executed: these tabs have no real process behind them, and the route's job
     # is to ask for the right ones to be killed.
     killed: list[str] = []
-    monkeypatch.setattr(project_routes, "kill_tab", lambda t: killed.append(t.id))
+    monkeypatch.setattr(teardown, "kill_tab", lambda t: killed.append(t.id))
 
     assert _client().delete("/api/workspaces/r/ws").status_code == 200
     assert not workspace.path.exists()

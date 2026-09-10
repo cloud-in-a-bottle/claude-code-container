@@ -293,6 +293,46 @@ Every call gets its **own** workspace (`main`, `main-2`, …) rather than reusin
 
 To open a private repo the workbench mints a short-lived, `repo`-scoped GitHub token via the openhost `oauth` service — the same flow openhost itself uses to clone private repos — injects it into the clone/fetch URL transiently, and strips it from the remote afterward so the token is never persisted on disk. Public repos clone without a token, and if no GitHub grant is available the clone falls back to an unauthenticated attempt.
 
+## Working a Linear issue
+
+Comment `@claude` on a Linear issue and the workbench picks it up: it works out which repo the issue is about, opens a workspace on a branch named for the issue, and starts Claude in it with the issue as its opening prompt. Claude does the work, opens a PR, and comments back on the issue. The workspace stays until the PR merges, so the conversation that produced it is there to follow up in.
+
+```
+Linear comment  ->  POST /api/linear/webhook  ->  resolve repo  ->  workspace + Claude  ->  PR  ->  Linear comment
+```
+
+**Only the owner's comments count.** The trigger is matched as plain text *or* as Linear's `@[Name](id)` mention markup, so it works whether or not a Linear user by that name exists. The comment's author is then checked against `viewer` on the Linear API — that is, whoever's credentials latchkey holds — and anything else is ignored. That check fails closed: if the owner can't be identified, nothing runs.
+
+**The webhook is this app's only public path**, because Linear can't authenticate as the zone owner. Everything about it is written for a caller who might be hostile: the payload isn't parsed until an HMAC-SHA256 signature over the raw bytes checks out, deliveries older than five minutes are refused so a captured one can't be replayed, and the error replies say nothing beyond whether the signature was right. With no `LINEAR_WEBHOOK_SECRET` configured it rejects everything rather than accepting anything.
+
+### Which repo an issue belongs to
+
+Every issue in the Linear project maps to a repo in a single GitHub org (`cloud-in-a-bottle` by default; set `LINEAR_GITHUB_ORG` to change it), but nothing in the issue names it. So the workbench lists the org's non-archived repos with their descriptions and asks Claude to pick one, weighing the issue's labels most heavily — the labels usually name the area of the project the work belongs to.
+
+Two things keep that from going quietly wrong. A name the model invents is rejected outright rather than becoming a clone URL that 404s halfway through creating a workspace. And below `MIN_REPO_CONFIDENCE` the run doesn't start at all: it comments on the issue with its top candidates and stops, so an ambiguous issue costs you a reply rather than a PR against the wrong repo.
+
+### Talking back to Linear
+
+There is no Linear API key in this container. Calls go through the [latchkey](https://github.com/cloud-in-a-bottle/latchkey) app, which holds the owner's credential and injects it into outbound requests, so the worst this app can do is make calls while it is running. The `linear` CLI on `PATH` wraps that for Claude:
+
+```bash
+linear whoami
+linear issue ENG-123
+linear comment ENG-123 "PR is open: <url>"
+```
+
+It needs no setup because every terminal already carries the openhost app token latchkey authenticates against.
+
+### Setting it up
+
+1. **Connect Linear in latchkey** (its console → connect → Linear), and approve the `linear-api` grant for claude-workbench when prompted.
+2. **Create the webhook in Linear** (Settings → API → Webhooks) pointing at `https://<app>.<zone>/api/linear/webhook`, subscribed to comment events. Scope it to the teams you want — team filtering lives in Linear, not here.
+3. **Store the signing secret** Linear gives you in the secrets app as `LINEAR_WEBHOOK_SECRET`.
+
+### After the PR
+
+Each run is recorded in `~/.workbench/linear-runs.json` — the one thing the workbench remembers about it, and only so the workspace can be found again from its PR. A background loop checks each run's branch every few minutes and deletes the workspace once the PR is **merged**. A PR closed without merging is left alone: that usually means the work was rejected, and the workspace is exactly where you'd go to understand why.
+
 ## Development
 
 ```bash
