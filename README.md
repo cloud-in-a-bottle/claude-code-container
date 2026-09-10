@@ -348,7 +348,7 @@ just build             # build the container image
 
 Python work uses [uv](https://docs.astral.sh/uv/). Use `uv add <pkg>` to add a dependency and `uv add --group dev <pkg>` for a dev-only one.
 
-The backend lives in `src/server/`: `routes/` holds the HTTP handlers, `projects/` the project/workspace model and the `create_workspace.sh` it launches, and `tabs.py` the PTY plumbing. `entrypoint.sh`, `workbench.sh`, `skills/` and `claude-home/` sit at the repo root because the container refers to them by absolute path.
+The backend lives in `src/server/`: `routes/` holds the HTTP handlers, `projects/` the project/workspace model and the `create_workspace.py` bootstrap it launches, and `tabs.py` the PTY plumbing. `entrypoint.sh`, `workbench.sh`, `skills/` and `claude-home/` sit at the repo root because the container refers to them by absolute path.
 
 The frontend is a Solid app in `ui/`, built by vite into `src/server/static/ui/bundle.{js,css}` — fixed names, since the page is a Jinja template that references them. That directory is generated and not committed; `just build-ui` makes it locally and the Dockerfile runs the same build for the image, so nothing needs a built bundle checked in. While working on the UI, run `just watch-ui` beside the server: the files land where it already serves them, so a reload is enough (and reloading is safe — terminals live server-side and the page reattaches).
 

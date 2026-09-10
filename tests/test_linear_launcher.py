@@ -177,7 +177,9 @@ class TestStartingWork:
         _choose(monkeypatch)
         asyncio.run(handle_comment(_event(body="@claude only touch the parser")))
 
-        prompt = tabs[0]["env"]["WS_PROMPT"]
+        # Read out of the command rather than the environment: this is the text claude is
+        # actually handed, quoted into the shell snippet the tab runs.
+        prompt = tabs[0]["command"][3]
         assert "ENG-7: Notes editor drops a character" in prompt
         assert "only touch the parser" in prompt
         assert "https://claude-workbench.zone.example.com/?workspace=md-notes/ENG-7" in prompt

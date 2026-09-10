@@ -18,6 +18,7 @@ from typing import Any
 import attr
 from litestar import WebSocket
 
+from server.claude_launch import claude_session_command
 from server.claude_sessions import latest_session_id
 from server.config import HOME
 from server.projects.workspaces import Workspace
@@ -46,20 +47,6 @@ _restoring: bool = False  # see restore_tabs(): suppresses the partial writes a 
 def new_session_id() -> str:
     """A stable id for one tab's Claude conversation. Must be a UUID; `claude --session-id` demands it."""
     return str(uuid.uuid4())
-
-
-def claude_session_command(claude_bin: str, session_id: str, *, resume_first: bool) -> str:
-    """Shell snippet that lands the user in `session_id`, whether or not it exists yet.
-
-    Both orderings work — the loser of the pair just exits non-zero — so the order only decides
-    whether the user sees a spurious error first. Lead with resume when the session is expected to
-    exist (a restore) and with create when it isn't (a brand new tab).
-    """
-    claude = shlex.quote(claude_bin)
-    sid = shlex.quote(session_id)
-    create = f"{claude} --session-id {sid} --dangerously-skip-permissions"
-    resume = f"{claude} --resume {sid} --dangerously-skip-permissions"
-    return f"{resume} || {create}" if resume_first else f"{create} || {resume}"
 
 
 def _proc_name(pgid: int) -> str:

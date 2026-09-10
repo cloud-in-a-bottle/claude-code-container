@@ -69,8 +69,7 @@ RUN chmod +x /app/entrypoint.sh && install -m 0755 /app/bin/linear /usr/local/bi
 # The app. `uv sync` installs the project editable, so it points at /app/src rather than copying
 # it, and the server serves its templates and static files from there.
 COPY src/ ./src/
-RUN uv sync --frozen --no-dev \
-    && chmod +x /app/src/server/projects/*.sh
+RUN uv sync --frozen --no-dev
 
 # The Solid frontend. .dockerignore drops **/node_modules, so this copy lands beside the
 # dependencies installed above rather than over them. vite's outDir is ../src/server/static/ui,
