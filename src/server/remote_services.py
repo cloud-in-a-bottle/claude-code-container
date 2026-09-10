@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import subprocess
+import time
 import urllib.parse
 from collections.abc import Mapping
 from datetime import UTC
@@ -35,9 +36,15 @@ GH_REFRESH_MIN_SECONDS = 60
 # Re-mint this long before the token actually expires, so a terminal never picks up a token that
 # dies mid-command.
 GH_REFRESH_SKEW_SECONDS = 5 * 60
+# How long an absent LINEAR_WEBHOOK_SECRET is remembered as absent, so that traffic to the public
+# webhook can't turn into one secrets lookup per request.
+LINEAR_SECRET_RETRY_SECONDS = 60.0
 
 _anthropic_key: str | None = None
 _anthropic_lock = asyncio.Lock()
+_linear_webhook_secret: str | None = None
+_linear_webhook_lock = asyncio.Lock()
+_linear_webhook_missing_since: float = 0.0
 _github_account: str | None = None
 
 
@@ -355,3 +362,31 @@ async def get_anthropic_key() -> str:
         if key:
             _anthropic_key = key
         return key
+
+
+async def get_linear_webhook_secret() -> str:
+    """Return the cached LINEAR_WEBHOOK_SECRET, fetching from secrets on first call.
+
+    Cached like the Anthropic key, but with more riding on it: this is what every delivery to the
+    app's one public path is verified against, so an empty value means the webhook rejects
+    everything rather than trusting anything.
+
+    A *failed* lookup is remembered too, for LINEAR_SECRET_RETRY_SECONDS. Without that, an
+    unauthenticated caller hitting the public webhook could drive one outbound call to the secrets
+    app per request, simply by never being configured. Re-checking periodically rather than never
+    means setting the secret still takes effect on its own, without a restart.
+    """
+    global _linear_webhook_secret, _linear_webhook_missing_since
+    if _linear_webhook_secret:
+        return _linear_webhook_secret
+    if time.monotonic() - _linear_webhook_missing_since < LINEAR_SECRET_RETRY_SECONDS:
+        return ""
+    async with _linear_webhook_lock:
+        if _linear_webhook_secret:
+            return _linear_webhook_secret
+        secret = (await fetch_secrets(["LINEAR_WEBHOOK_SECRET"])).get("LINEAR_WEBHOOK_SECRET", "")
+        if secret:
+            _linear_webhook_secret = secret
+        else:
+            _linear_webhook_missing_since = time.monotonic()
+        return secret

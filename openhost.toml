@@ -9,6 +9,11 @@ port = 5000
 
 [routing]
 health_check = "/health"
+# The only publicly reachable path in this app. Linear delivers webhooks unauthenticated, so it
+# cannot pass the router's owner login -- every other route stays owner-gated. The handler verifies
+# Linear's HMAC signature over the raw body before it looks at the payload, and ignores deliveries
+# whose timestamp is stale, so an unsigned or replayed POST is refused without doing any work.
+public_paths = ["/api/linear/webhook"]
 
 [resources]
 memory_mb = 4096
@@ -39,6 +44,9 @@ version = ">=0.1.0"
 grants = [
     {key = "ANTHROPIC_API_KEY"},
     {key = "OH_TOKEN"},
+    # Linear's webhook signing secret. Inbound deliveries are the one thing latchkey can't broker,
+    # since it injects credentials into outbound calls; without this the webhook refuses everything.
+    {key = "LINEAR_WEBHOOK_SECRET"},
 ]
 
 # Mint a transient GitHub token so open-workspace can clone private repos that
@@ -51,4 +59,15 @@ shortname = "oauth"
 version = ">=0.1.0"
 grants = [
     {provider = "github", scopes = ["repo"]},
+]
+
+# Linear is reached through latchkey, which injects the owner's credentials into outbound calls, so
+# no Linear API key is ever stored in or visible to this app. `linear-api` is detent's built-in
+# scope for api.linear.app; it has no finer-grained permission schemas, so the scope is the grant.
+[[services.v2.consumes]]
+service = "github.com/imbue-openhost/openhost-latchkey/services/latchkey"
+shortname = "latchkey"
+version = ">=0.2.0"
+grants = [
+    {scope = "linear-api", permissions = []},
 ]

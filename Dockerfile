@@ -61,13 +61,15 @@ COPY .dockerignore .gitignore .pre-commit-config.yaml Dockerfile ./
 COPY services/ ./services/
 COPY skills/ ./skills/
 COPY claude-home/ ./claude-home/
-RUN chmod +x /app/entrypoint.sh
+# `linear` goes on PATH for every terminal: a Claude working a Linear issue posts back to the issue
+# with it, and it needs no credentials of its own because latchkey injects them.
+COPY bin/ ./bin/
+RUN chmod +x /app/entrypoint.sh && install -m 0755 /app/bin/linear /usr/local/bin/linear
 
 # The app. `uv sync` installs the project editable, so it points at /app/src rather than copying
 # it, and the server serves its templates and static files from there.
 COPY src/ ./src/
-RUN uv sync --frozen --no-dev \
-    && chmod +x /app/src/server/projects/*.sh
+RUN uv sync --frozen --no-dev
 
 # The Solid frontend. .dockerignore drops **/node_modules, so this copy lands beside the
 # dependencies installed above rather than over them. vite's outDir is ../src/server/static/ui,

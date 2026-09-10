@@ -9,7 +9,6 @@ from litestar import patch
 from litestar import post
 from litestar.params import FromPath
 
-from server.editor import instances as editor_instances
 from server.git_remote import REF_RE
 from server.git_remote import RepoAccess
 from server.git_remote import repo_dir_name
@@ -23,9 +22,9 @@ from server.projects.store import find_project
 from server.projects.store import load_projects
 from server.projects.store import remove_project
 from server.projects.store import save_projects
+from server.projects.teardown import teardown_workspace
 from server.projects.workspaces import Workspace
 from server.projects.workspaces import create_workspace_dir
-from server.projects.workspaces import delete_workspace
 from server.projects.workspaces import list_workspaces
 from server.projects.workspaces import mirror_path
 from server.projects.workspaces import parse_workspace_id
@@ -34,9 +33,6 @@ from server.routes.common import JsonDict
 from server.routes.common import error
 from server.routes.common import json_body
 from server.routes.tabs import tab_json
-from server.tabs import _tabs
-from server.tabs import kill_tab
-from server.tabs import tabs_for_workspace
 
 # What the caller sees when a repo can't be reached, keyed by RepoAccess.decision.
 _ACCESS_ERRORS = {
@@ -214,12 +210,5 @@ async def remove_workspace(project_id: FromPath[str], name: FromPath[str]) -> Re
     if not workspace.path.is_dir():
         return error(404, error="not_found", message=f"no workspace {project_id}/{name}")
 
-    for tab in tabs_for_workspace(workspace.id):
-        _tabs.pop(tab.id, None)
-        kill_tab(tab)
-    # Before the directory goes: an editor left running over a deleted workspace holds a GB of
-    # process for a folder that no longer exists.
-    await editor_instances.stop(workspace.id)
-    editor_instances.forget_workspace(workspace.id)
-    delete_workspace(workspace)
+    await teardown_workspace(workspace)
     return Response(content={"ok": True})

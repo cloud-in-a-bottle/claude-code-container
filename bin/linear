@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+"""Talk to Linear from inside a workspace, with credentials injected by latchkey.
+
+No Linear API key exists in this container. Calls go through the openhost router to the latchkey
+app, which holds the owner's Linear credential and attaches it on the way out, so the only thing
+needed here is the app token every terminal already has in its environment.
+
+    linear whoami
+    linear issue ENG-123
+    linear comment ENG-123 "the PR is up: <url>"
+    linear comment ENG-123 -            # body read from stdin
+"""
+
+import argparse
+import json
+import os
+import re
+import sys
+import urllib.error
+import urllib.request
+
+GRAPHQL_URL = "https://api.linear.app/graphql"
+IDENTIFIER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*-\d+$")
+TIMEOUT_SECONDS = 30
+
+
+def call(query, variables):
+    router = os.environ.get("OPENHOST_ROUTER_URL", "")
+    token = os.environ.get("OPENHOST_APP_TOKEN", "")
+    if not router or not token:
+        sys.exit("OPENHOST_ROUTER_URL and OPENHOST_APP_TOKEN must be set; are you in a workbench terminal?")
+
+    request = urllib.request.Request(
+        f"{router}/api/services/v2/call/latchkey/proxy/{GRAPHQL_URL}",
+        data=json.dumps({"query": query, "variables": variables}).encode(),
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as resp:
+            body = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors="replace")[:500]
+        if e.code == 403 and "permission_required" in detail:
+            sys.exit(f"latchkey has no `linear-api` grant for this app yet. Details: {detail}")
+        sys.exit(f"latchkey returned {e.code}: {detail}")
+    except urllib.error.URLError as e:
+        sys.exit(f"could not reach latchkey: {e}")
+
+    if body.get("errors"):
+        sys.exit(f"Linear rejected the query: {json.dumps(body['errors'])}")
+    return body.get("data") or {}
+
+
+def resolve_issue_id(reference):
+    """Accept either a Linear UUID or a human identifier like ENG-123."""
+    if not IDENTIFIER_RE.match(reference):
+        return reference
+    data = call("query Issue($id: String!) { issue(id: $id) { id } }", {"id": reference})
+    issue = data.get("issue") or {}
+    if not issue.get("id"):
+        sys.exit(f"no Linear issue {reference}")
+    return issue["id"]
+
+
+def cmd_whoami(_args):
+    viewer = call("query { viewer { id name email } }", {}).get("viewer") or {}
+    print(json.dumps(viewer, indent=2))
+
+
+def cmd_issue(args):
+    query = """
+    query Issue($id: String!) {
+      issue(id: $id) {
+        id identifier title description url state { name }
+        labels { nodes { name } }
+      }
+    }
+    """
+    print(json.dumps(call(query, {"id": args.issue}).get("issue"), indent=2))
+
+
+def cmd_comment(args):
+    body = sys.stdin.read() if args.body == "-" else args.body
+    if not body.strip():
+        sys.exit("refusing to post an empty comment")
+    mutation = """
+    mutation Comment($issueId: String!, $body: String!) {
+      commentCreate(input: {issueId: $issueId, body: $body}) { success comment { url } }
+    }
+    """
+    result = call(mutation, {"issueId": resolve_issue_id(args.issue), "body": body}).get("commentCreate") or {}
+    if not result.get("success"):
+        sys.exit("Linear did not accept the comment")
+    print((result.get("comment") or {}).get("url", "comment posted"))
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="linear", description=__doc__.splitlines()[0])
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("whoami", help="the Linear account latchkey is acting as").set_defaults(run=cmd_whoami)
+
+    issue = sub.add_parser("issue", help="print an issue as JSON")
+    issue.add_argument("issue", help="issue identifier (ENG-123) or id")
+    issue.set_defaults(run=cmd_issue)
+
+    comment = sub.add_parser("comment", help="post a comment on an issue")
+    comment.add_argument("issue", help="issue identifier (ENG-123) or id")
+    comment.add_argument("body", help="comment body, or - to read it from stdin")
+    comment.set_defaults(run=cmd_comment)
+
+    args = parser.parse_args()
+    args.run(args)
+
+
+if __name__ == "__main__":
+    main()
