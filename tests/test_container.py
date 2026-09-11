@@ -48,6 +48,12 @@ def _podman(*args: str) -> str:
     return subprocess.run(["podman", *args], capture_output=True, text=True, timeout=60, check=True).stdout.strip()
 
 
+def _container_name() -> str:
+    """The harness has no public handle on the container, so rebuild the name openhost gives it."""
+    manifest = tomllib.loads((Path(__file__).parent.parent / "openhost.toml").read_text())
+    return f"openhost-{manifest['app']['name']}"
+
+
 def test_a_hangup_from_inside_does_not_take_the_container_down(stack: OpenhostStack) -> None:
     """`kill -HUP 1` has to be survivable, because this container invites code that can send it.
 
@@ -56,10 +62,7 @@ def test_a_hangup_from_inside_does_not_take_the_container_down(stack: OpenhostSt
     every workspace with it. The entrypoint ignores SIGHUP before exec'ing tini; this checks that
     the container is still the same one afterwards, not a restarted replacement.
     """
-    # The harness has no public handle on the container, so the name is rebuilt the way openhost
-    # builds it: openhost-<the manifest's app name>.
-    manifest = tomllib.loads((Path(__file__).parent.parent / "openhost.toml").read_text())
-    container = f"openhost-{manifest['app']['name']}"
+    container = _container_name()
     started_at = _podman("inspect", container, "--format", "{{.State.StartedAt}}")
 
     # Both targets matter and they fail for different reasons: pid 1 is tini, which installs no
@@ -73,3 +76,36 @@ def test_a_hangup_from_inside_does_not_take_the_container_down(stack: OpenhostSt
         assert _podman("inspect", container, "--format", "{{.State.StartedAt}}") == started_at, (
             f"restarted after SIGHUP to pid {target}"
         )
+
+
+# Run inside the container against the shipped module, because this is all /proc reading and the
+# shape it reads only exists on Linux.
+_PROGRAM_PROBE = """
+import os, pty, subprocess, time
+from server.tabs import ServerTab, tab_proc_info
+
+master, slave = pty.openpty()
+proc = subprocess.Popen(
+    ["bash", "-l", "-c", "sleep 300; exec bash"],
+    stdin=slave, stdout=slave, stderr=slave, preexec_fn=os.setsid,
+)
+os.close(slave)
+program = ""
+deadline = time.monotonic() + 10
+while time.monotonic() < deadline and not program:
+    program, _cwd = tab_proc_info(ServerTab(id="p", label="p", master_fd=master, proc=proc))
+    time.sleep(0.1)
+os.killpg(proc.pid, 9)
+print(program)
+"""
+
+
+def test_a_tab_reports_the_program_its_shell_is_running(stack: OpenhostStack) -> None:
+    """Every tab here is `bash -l -c '<program>; exec bash'`, and that shell is not interactive.
+
+    With no job control the program never takes the terminal for itself, so the pty's foreground
+    group leads with the shell — and reading the leader's name alone reported every Claude tab,
+    and every workspace still bootstrapping, as a bare shell.
+    """
+    program = _podman("exec", _container_name(), "python3", "-c", _PROGRAM_PROBE)
+    assert program.splitlines()[-1] == "sleep"
