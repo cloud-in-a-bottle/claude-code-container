@@ -156,8 +156,7 @@ def test_kill_tab_ends_the_shells_children_too(workbench_home: Path) -> None:
         )
         pgid = os.getpgid(tab.proc.pid)
         os.killpg(pgid, 0)  # the whole tab is alive, in a group of its own
-        # Killed inside the loop on purpose: tab_reader is parked in a blocking os.read() on an
-        # executor thread, and only the PTY closing lets asyncio shut that pool down.
+        # Killed inside the loop on purpose: the tab's reader is registered on it.
         tabs_module.kill_tab(tab)
         return pgid
 
@@ -171,6 +170,72 @@ def test_kill_tab_ends_the_shells_children_too(workbench_home: Path) -> None:
             return
         time.sleep(0.05)
     raise AssertionError("the tab's process group outlived kill_tab")
+
+
+def test_a_tab_past_the_thread_pools_size_still_works(workbench_home: Path) -> None:
+    """Readers used to sit in a blocking os.read() on asyncio's default executor.
+
+    That pool holds cpu_count + 4 threads and a parked reader never gives one back, so once that
+    many quiet tabs were open every tab after them was dead on arrival: nothing it printed was
+    ever read, and nothing typed at it echoed back.
+    """
+    count = (os.cpu_count() or 1) + 8
+
+    async def fill_the_pool_then_type_at_the_last_tab() -> bytes:
+        tabs = [
+            await tabs_module.create_server_tab(
+                command=["bash", "-c", "sleep 300"],  # silent, so every reader parks and stays parked
+                cwd=str(workbench_home),
+                label=f"t{i}",
+            )
+            for i in range(count)
+        ]
+        await asyncio.sleep(0.5)  # let every reader reach its read before anything has output
+        last = tabs[-1]
+        os.write(last.master_fd, b"echoed-by-the-tty\n")
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and b"echoed-by-the-tty" not in last.output_buf:
+            await asyncio.sleep(0.05)
+        buf = bytes(last.output_buf)
+        for tab in tabs:
+            tabs_module.kill_tab(tab)
+        return buf
+
+    buf = asyncio.run(fill_the_pool_then_type_at_the_last_tab())
+    assert b"echoed-by-the-tty" in buf, f"tab {count} of {count} never read anything back"
+
+
+def test_a_paste_too_big_for_the_pty_neither_blocks_nor_is_lost(workbench_home: Path) -> None:
+    """A pty takes a few KB of input at a time and no more.
+
+    Writing the rest of a large paste straight to the fd parked the event loop until the program
+    on the other end read it — every other tab in the workbench frozen behind one slow reader.
+    """
+    payload = (b"x" * 63 + b"\n") * 4000  # ~256 KB, far past any pty's input buffer
+
+    async def paste_at_a_slow_reader() -> tuple[float, int, int]:
+        tab = await tabs_module.create_server_tab(
+            # Reads nothing for half a second, so the pty is certainly full when the paste lands.
+            command=["bash", "-c", "stty -echo; sleep 0.5; exec cat > /dev/null"],
+            cwd=str(workbench_home),
+            label="t",
+        )
+        await asyncio.sleep(0.2)
+        started = time.monotonic()
+        tabs_module.write_to_tab(tab, payload)
+        elapsed = time.monotonic() - started
+        held_back = len(tab.input_buf)
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and tab.input_buf:
+            await asyncio.sleep(0.05)
+        left_over = len(tab.input_buf)
+        tabs_module.kill_tab(tab)
+        return elapsed, held_back, left_over
+
+    elapsed, held_back, left_over = asyncio.run(paste_at_a_slow_reader())
+    assert elapsed < 0.2, f"write_to_tab held the event loop for {elapsed:.2f}s"
+    assert held_back > 0, "the pty swallowed the whole paste, so this no longer tests anything"
+    assert left_over == 0, f"{left_over} bytes of the paste were never delivered"
 
 
 def test_a_workspace_with_a_conversation_on_disk_rejoins_it(

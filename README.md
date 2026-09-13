@@ -130,6 +130,8 @@ Terminals belong to a workspace. You only see the ones for the workspace you're 
 
 Closing a panel kills the terminal behind it. If you close the browser instead (or a restart brings terminals back), **+ terminal** in the top bar lists any that are running without a panel so you can reattach.
 
+There is no thread behind any of this: both directions of every PTY are registered on the event loop. Reading each one in a thread instead put a hard ceiling on how many terminals the workbench could have — asyncio's default pool is `cpu_count + 4` threads and a reader parked in `os.read()` never gives its back, so past that many tabs the rest drew nothing and swallowed everything typed at them. Writing has the same shape from the other side: a pty accepts a few KB of input at a time, so a large paste into a program that is slow to read would have blocked every other terminal until it caught up. The overflow waits in the tab instead and goes out as room appears.
+
 **+ editor** opens a VS Code panel for the workspace in the same layout — see [The editor](#the-editor-vs-code-in-a-panel).
 
 The frontend source is in `ui/`; see [Development](#development) for the build.

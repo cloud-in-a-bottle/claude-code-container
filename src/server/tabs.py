@@ -37,6 +37,10 @@ from server.tab_store import save_tabs
 _BUF_MAX = 2 * 1024 * 1024
 _REPLAY_CHUNK = 64 * 1024
 _KICKED_MSG = b"\x01" + json.dumps({"type": "kicked"}).encode()
+# How far under a tab's foreground process group to look for the program it is running.
+# Deep enough for the login shell -> claude -> a tool call it spawned, shallow enough to
+# stay cheap on a list every open browser polls.
+_PROGRAM_SEARCH_DEPTH = 4
 
 _tabs: dict[str, ServerTab] = {}
 _tab_counter: int = 0
@@ -49,10 +53,10 @@ def new_session_id() -> str:
     return str(uuid.uuid4())
 
 
-def _proc_name(pgid: int) -> str:
-    """Return a human-readable process name for the PGID, or '' for shells/unknowns."""
+def _proc_name(pid: int) -> str:
+    """Return a human-readable process name for the pid, or '' for shells/unknowns."""
     try:
-        with open(f"/proc/{pgid}/comm") as f:
+        with open(f"/proc/{pid}/comm") as f:
             comm = f.read().strip()
     except OSError:
         return ""
@@ -60,7 +64,7 @@ def _proc_name(pgid: int) -> str:
         return ""
     if comm == "node":
         try:
-            with open(f"/proc/{pgid}/cmdline", "rb") as f:
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
                 cmdline = f.read().replace(b"\x00", b" ").decode("utf-8", errors="replace")
             if "claude" in cmdline.lower():
                 return "claude"
@@ -68,6 +72,61 @@ def _proc_name(pgid: int) -> str:
             pass
         return ""
     return comm
+
+
+def _proc_pgid(pid: int) -> int:
+    """The process group a pid belongs to, or -1 if it can't be read."""
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as f:
+            stat = f.read()
+    except OSError:
+        return -1
+    # comm sits in parentheses and may contain spaces, so the fields after it are counted from the
+    # last ')' rather than by splitting the whole line: state, ppid, then pgrp.
+    fields = stat[stat.rfind(b")") + 1 :].split()
+    if len(fields) < 3:
+        return -1
+    try:
+        return int(fields[2])
+    except ValueError:
+        return -1
+
+
+def _group_members(pid: int, pgid: int) -> list[int]:
+    """The children of `pid` that are still in process group `pgid`.
+
+    A job an interactive shell backgrounds gets a group of its own, so filtering by group is what
+    keeps a `sleep 300 &` from being reported as the tab's program.
+    """
+    try:
+        with open(f"/proc/{pid}/task/{pid}/children") as f:
+            children = [int(c) for c in f.read().split()]
+    except OSError, ValueError:
+        return []
+    return [c for c in children if _proc_pgid(c) == pgid]
+
+
+def _foreground_program(pgid: int) -> str:
+    """What the tab is running, or '' when it is sitting at a shell prompt.
+
+    Usually the group leader is the answer, but not for the shells this app starts: `bash -c` is
+    non-interactive, so it has no job control and the commands it runs stay in its own process
+    group instead of taking the terminal for themselves. A Claude tab's foreground group therefore
+    leads with the login shell and has claude one level under it, which read as a bare shell.
+
+    Searched a generation at a time so a tab reads as the program it launched rather than whatever
+    that program has most recently shelled out to.
+    """
+    generation = [pgid]
+    for _ in range(_PROGRAM_SEARCH_DEPTH):
+        for pid in generation:
+            name = _proc_name(pid)
+            if name:
+                return name
+        generation = [child for pid in generation for child in _group_members(pid, pgid)]
+        if not generation:
+            break
+    return ""
 
 
 def tab_proc_info(tab: ServerTab) -> tuple[str, str]:
@@ -85,7 +144,7 @@ def tab_proc_info(tab: ServerTab) -> tuple[str, str]:
     if pgid <= 0:
         return "", ""
 
-    program = _proc_name(pgid)
+    program = _foreground_program(pgid)
 
     cwd = ""
     try:
@@ -121,6 +180,9 @@ class ServerTab:
     connected: bool = False
     alive: bool = True
     output_buf: bytearray = attr.Factory(bytearray)
+    # Input the pty hasn't accepted yet. See write_to_tab(): the fd is non-blocking, so a paste
+    # bigger than the pty's own buffer is held here until the program on the other end catches up.
+    input_buf: bytearray = attr.Factory(bytearray)
     client_queue: asyncio.Queue[bytes | None] | None = None
     kick_event: asyncio.Event | None = None
 
@@ -148,36 +210,88 @@ def replay_frames(buf: bytes) -> Iterator[bytes]:
         yield buf[start : start + _REPLAY_CHUNK]
 
 
-async def tab_reader(tab: ServerTab) -> None:
-    """Background task: drain master_fd into the ring buffer and the client queue."""
-    loop = asyncio.get_event_loop()
-    while True:
+def _queue_for_client(tab: ServerTab, item: bytes | None) -> None:
+    """Hand a pty chunk (or None, for end-of-output) to whoever is attached, if anyone is."""
+    if tab.client_queue is None:
+        return
+    try:
+        tab.client_queue.put_nowait(item)
+    except asyncio.QueueFull:
+        pass
+
+
+def start_tab_reader(tab: ServerTab) -> None:
+    """Drain master_fd into the ring buffer and the client queue, straight off the event loop.
+
+    Reading in a thread instead would cap the whole workbench at the size of asyncio's default
+    executor (cpu_count + 4). A reader parked in a blocking os.read() never gives its thread back,
+    so past that many tabs the rest never got one: no output, and no echo of anything typed.
+    """
+    loop = asyncio.get_running_loop()
+
+    def on_readable() -> None:
         try:
-            data = await loop.run_in_executor(None, os.read, tab.master_fd, 4096)
+            data = os.read(tab.master_fd, 4096)
+        except BlockingIOError:
+            return  # a wakeup with nothing behind it; the fd is non-blocking for write_to_tab()
         except OSError:
-            tab.alive = False
-            persist_tabs()
-            if tab.client_queue is not None:
-                try:
-                    tab.client_queue.put_nowait(None)
-                except asyncio.QueueFull:
-                    pass
-            return
+            data = b""  # EIO: the last slave fd is closed, so the tab's process is gone
         if not data:
+            stop_tab_reader(tab)
             tab.alive = False
             persist_tabs()
-            if tab.client_queue is not None:
-                try:
-                    tab.client_queue.put_nowait(None)
-                except asyncio.QueueFull:
-                    pass
+            _queue_for_client(tab, None)
             return
         record_output(tab.output_buf, data)
-        if tab.client_queue is not None:
-            try:
-                tab.client_queue.put_nowait(data)
-            except asyncio.QueueFull:
-                pass
+        _queue_for_client(tab, data)
+
+    loop.add_reader(tab.master_fd, on_readable)
+
+
+def stop_tab_reader(tab: ServerTab) -> None:
+    """Unregister the pty before its fd is closed, so a reused fd number can't wake a dead tab."""
+    if tab.master_fd < 0:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    loop.remove_reader(tab.master_fd)
+    loop.remove_writer(tab.master_fd)
+
+
+def write_to_tab(tab: ServerTab, data: bytes) -> None:
+    """Send input to the tab's pty, holding back whatever the kernel won't take right now.
+
+    A pty's input buffer is a few KB, so pasting more than that into a program that is slow to
+    read — claude, mid-turn — cannot be written in one go. The fd is non-blocking precisely so
+    that doesn't stall the event loop, which would freeze every other tab in the workbench until
+    the reader caught up, so the remainder waits here and goes out as room appears.
+    """
+    if tab.master_fd < 0:
+        return  # killed out from under its websocket, which can still be mid-message
+    tab.input_buf.extend(data)
+    _drain_tab_input(tab)
+
+
+def _drain_tab_input(tab: ServerTab) -> None:
+    """Push as much pending input into the pty as it will take, and arrange to finish later."""
+    while tab.input_buf:
+        try:
+            written = os.write(tab.master_fd, tab.input_buf)
+        except BlockingIOError:
+            break
+        except OSError:
+            # The pty is gone; the reader will notice and mark the tab dead.
+            tab.input_buf.clear()
+            break
+        del tab.input_buf[:written]
+
+    loop = asyncio.get_running_loop()
+    if tab.input_buf:
+        loop.add_writer(tab.master_fd, _drain_tab_input, tab)
+    else:
+        loop.remove_writer(tab.master_fd)
 
 
 async def create_server_tab(
@@ -204,6 +318,9 @@ async def create_server_tab(
     tab_label = label or f"term {_tab_counter}"
 
     master_fd, slave_fd = pty.openpty()
+    # Both halves of this fd are driven from the event loop, and neither may park it: see
+    # start_tab_reader() and write_to_tab().
+    os.set_blocking(master_fd, False)
     set_winsize(master_fd, 24, 80)
 
     merged_env = {
@@ -245,17 +362,14 @@ async def create_server_tab(
     )
     _tabs[tab_id] = tab
 
-    asyncio.create_task(tab_reader(tab))
+    start_tab_reader(tab)
     persist_tabs()
 
     if stdin_seed:
 
         async def _seed() -> None:
             await asyncio.sleep(0.5)
-            try:
-                os.write(master_fd, stdin_seed.encode())
-            except OSError:
-                pass
+            write_to_tab(tab, stdin_seed.encode())
 
         asyncio.create_task(_seed())
 
@@ -409,10 +523,16 @@ def kill_tab(tab: ServerTab) -> None:
         os.killpg(pgid, signal.SIGHUP)
     except OSError:
         pass
+    stop_tab_reader(tab)
     try:
         os.close(tab.master_fd)
     except OSError:
         pass
+    # Both said here rather than left to the reader noticing EOF, because unregistering it above
+    # means it never will. The fd number goes too: the kernel hands it to the next tab that opens
+    # a pty, and a late write from this one's websocket must not land in that tab.
+    tab.master_fd = -1
+    tab.alive = False
     try:
         tab.proc.wait(timeout=2)
     except subprocess.TimeoutExpired:
@@ -420,11 +540,7 @@ def kill_tab(tab: ServerTab) -> None:
             os.killpg(pgid, signal.SIGKILL)
         except OSError:
             pass
-    if tab.client_queue is not None:
-        try:
-            tab.client_queue.put_nowait(None)
-        except asyncio.QueueFull:
-            pass
+    _queue_for_client(tab, None)
     persist_tabs()
 
 
@@ -502,7 +618,7 @@ async def handle_terminal_ws(socket: WebSocket[Any, Any, Any]) -> None:
                 except Exception:
                     pass
             elif first_msg[0] == 0x00:
-                os.write(tab.master_fd, bytes(first_msg[1:]))
+                write_to_tab(tab, bytes(first_msg[1:]))
     except Exception:
         pass
 
@@ -534,13 +650,13 @@ async def handle_terminal_ws(socket: WebSocket[Any, Any, Any]) -> None:
                     kind = msg[0]
                     payload = bytes(msg[1:])
                     if kind == 0x00:
-                        os.write(tab.master_fd, payload)
+                        write_to_tab(tab, payload)
                     elif kind == 0x01:
                         ctrl = json.loads(payload)
                         if ctrl.get("type") == "resize":
                             set_winsize(tab.master_fd, int(ctrl["rows"]), int(ctrl["cols"]))
                 elif isinstance(msg, str):
-                    os.write(tab.master_fd, msg.encode())
+                    write_to_tab(tab, msg.encode())
         except Exception:
             pass
 
