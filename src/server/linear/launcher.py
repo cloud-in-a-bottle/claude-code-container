@@ -1,5 +1,7 @@
 from collections import deque
 
+from server.billing import default_mode
+from server.billing import pin_workspace_mode
 from server.git_remote import resolve_access
 from server.linear import api
 from server.linear.config import GITHUB_ORG
@@ -87,6 +89,9 @@ async def _start_run(event: CommentEvent, issue: api.LinearIssue) -> None:
         name=unique_workspace_name(project.id, workspace_base_name(issue.identifier)),
     )
     create_workspace_dir(workspace)
+    # A run picks no billing mode of its own, so it gets the workbench default — pinned now,
+    # like any other workspace, so a later change of default leaves this run alone.
+    pin_workspace_mode(workspace.id, default_mode())
 
     branch = branch_name(issue.identifier, issue.title)
     prompt = build_run_prompt(issue, instructions_from(event.body), branch, workspace.id)

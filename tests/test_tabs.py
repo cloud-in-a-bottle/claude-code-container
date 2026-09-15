@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from server import billing
 from server import claude_sessions
 from server import tab_store
 from server import tabs as tabs_module
@@ -50,7 +51,9 @@ def _stub_tab_creation(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
         return ""
 
     monkeypatch.setattr(tabs_module, "create_server_tab", fake_create)
-    monkeypatch.setattr(tabs_module, "get_anthropic_key", no_key)
+    # The real auth lookup, minus the trip to the secrets app: tabs read their billing mode off
+    # disk (redirected to a temp home), and that path should stay exercised here.
+    monkeypatch.setattr(billing, "get_anthropic_key", no_key)
     return created
 
 

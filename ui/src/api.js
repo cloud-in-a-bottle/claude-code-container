@@ -29,8 +29,8 @@ export const createProject = (repoUrl, name, setup, defaultBranch) =>
 export const updateProject = (id, patch) => request('PATCH', `/api/projects/${encodeURIComponent(id)}`, patch);
 export const deleteProject = (id) => request('DELETE', `/api/projects/${encodeURIComponent(id)}`);
 
-export const createWorkspace = (projectId, name, ref) =>
-  request('POST', '/api/workspaces', { project_id: projectId, name, ref });
+export const createWorkspace = (projectId, name, ref, billing) =>
+  request('POST', '/api/workspaces', { project_id: projectId, name, ref, billing });
 export const deleteWorkspace = (workspaceId) =>
   request('DELETE', `/api/workspaces/${workspaceId.split('/').map(encodeURIComponent).join('/')}`);
 
@@ -59,6 +59,12 @@ export async function uploadPastedImage(blob) {
 }
 
 export const saveUiSettings = (patch) => request('POST', '/api/ui/settings', patch);
+
+/** Workbench settings: which billing mode new workspaces get, and whether each one has
+ *  credentials. The subscription half runs `claude auth status` in the container, so this is a
+ *  request to make on demand rather than on a poll. */
+export const getSettings = () => request('GET', '/api/settings');
+export const saveSettings = (patch) => request('POST', '/api/settings', patch);
 
 export const listEditors = () => request('GET', '/api/editor');
 export const startEditor = (workspaceId) => request('POST', '/api/editor', { workspace_id: workspaceId });

@@ -28,7 +28,7 @@ body.sidebar-hidden #sidebar { display: none; }
   text-transform: uppercase;
   color: var(--faint);
 }
-#add-project, #sidebar-collapse {
+#add-project, #workbench-settings, #sidebar-collapse {
   background: none;
   border: 1px solid transparent;
   color: var(--faint);
@@ -39,7 +39,7 @@ body.sidebar-hidden #sidebar { display: none; }
   border-radius: 3px;
   font-family: inherit;
 }
-#add-project:hover, #sidebar-collapse:hover { color: var(--bright); background: var(--hover-bg); border-color: var(--menu-border); }
+#add-project:hover, #workbench-settings:hover, #sidebar-collapse:hover { color: var(--bright); background: var(--hover-bg); border-color: var(--menu-border); }
 
 /* Only shown while the rail is hidden, so the rail can be brought back. */
 #sidebar-toggle {
@@ -96,6 +96,18 @@ body.sidebar-hidden #sidebar-toggle { display: flex; }
 .workspace-row:hover { background: var(--hover-bg); color: var(--bright); }
 .workspace-row.active { background: var(--bg); color: var(--bright); box-shadow: inset 2px 0 0 var(--accent); }
 .workspace-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Only worn by workspaces that aren't on the workbench default, so the rail stays quiet. */
+.ws-billing {
+  flex: 0 0 auto;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 3px;
+}
 
 .sidebar-empty { padding: 10px 12px; color: var(--menu-desc); font-size: 12px; line-height: 1.5; }
 .project-empty { padding: 2px 6px 2px 26px; color: var(--menu-desc); font-size: 12px; font-style: italic; }
