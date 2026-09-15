@@ -183,7 +183,9 @@ class TestStartingWork:
         assert "ENG-7: Notes editor drops a character" in prompt
         assert "only touch the parser" in prompt
         assert "https://claude-workbench.zone.example.com/?workspace=md-notes/ENG-7" in prompt
-        assert "linear comment ENG-7" in prompt
+        # `--agent` matters, not just the command: the comment posts under the owner's own
+        # Linear account, so dropping the flag puts their name and avatar on machine output.
+        assert "linear comment ENG-7 --agent" in prompt
 
     def test_records_the_run_so_the_reaper_can_find_its_pr(
         self, workbench_home: Path, monkeypatch: pytest.MonkeyPatch, tabs: list[dict[str, Any]]
