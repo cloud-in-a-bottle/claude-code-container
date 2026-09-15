@@ -8,8 +8,7 @@ from server.linear.config import GITHUB_ORG
 from server.linear.config import MIN_REPO_CONFIDENCE
 from server.linear.events import CommentEvent
 from server.linear.events import instructions_from
-from server.linear.naming import branch_name
-from server.linear.naming import workspace_base_name
+from server.linear.naming import run_name
 from server.linear.prompt import build_run_prompt
 from server.linear.repos import list_org_repos
 from server.linear.resolve import RepoChoice
@@ -86,14 +85,17 @@ async def _start_run(event: CommentEvent, issue: api.LinearIssue) -> None:
     project = find_project_by_repo(clone_url) or add_project(name=repo.name, repo_url=clone_url)
     workspace = Workspace(
         project_id=project.id,
-        name=unique_workspace_name(project.id, workspace_base_name(issue.identifier)),
+        name=unique_workspace_name(project.id, run_name(issue.identifier, choice.slug, issue.title)),
     )
     create_workspace_dir(workspace)
     # A run picks no billing mode of its own, so it gets the workbench default — pinned now,
     # like any other workspace, so a later change of default leaves this run alone.
     pin_workspace_mode(workspace.id, default_mode())
 
-    branch = branch_name(issue.identifier, issue.title)
+    # The branch is the workspace's name verbatim, including the `-2` that a second run on the same
+    # issue picks up: the sidebar entry and `git branch` then read the same, and two runs on one
+    # issue can't push to the same branch and fight over one PR.
+    branch = workspace.name
     prompt = build_run_prompt(issue, instructions_from(event.body), branch, workspace.id)
     await start_workspace_tab(
         project,

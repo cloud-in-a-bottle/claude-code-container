@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 
 from server.linear.api import LinearIssue
-from server.linear.naming import branch_name
-from server.linear.naming import workspace_base_name
+from server.linear.naming import descriptor_slug
+from server.linear.naming import run_name
 from server.linear.repos import GithubRepo
 from server.linear.repos import OrgRepos
 from server.linear.resolve import RepoResolutionError
@@ -32,29 +32,70 @@ ISSUE = LinearIssue(
 )
 
 
-class TestBranchName:
+class TestRunName:
+    def test_reads_as_the_task_not_the_title(self) -> None:
+        """The whole point: `add-managed-spaces-docs` beats the title's first five words."""
+        assert run_name("CB-295", "add-managed-spaces-docs", "Add a doc about our managed spaces") == (
+            "cb-295-add-managed-spaces-docs"
+        )
+
     def test_leads_with_the_issue_key_so_linear_links_the_pr(self) -> None:
-        assert branch_name("ENG-123", "Fix the thing") == "eng-123-fix-the-thing"
+        assert run_name("ENG-123", "fix-the-thing").startswith("eng-123-")
+
+    def test_falls_back_to_the_title_when_no_descriptor_came_back(self) -> None:
+        assert run_name("ENG-1", "", "Fix the thing") == "eng-1-fix-the-thing"
+
+    def test_with_neither_it_is_still_a_usable_name(self) -> None:
+        assert run_name("ENG-1", "", "") == "eng-1"
+
+    def test_a_descriptor_written_as_prose_is_still_usable(self) -> None:
+        """Models don't always honour "hyphen-separated"."""
+        assert run_name("ENG-1", "Add managed spaces docs") == "eng-1-add-managed-spaces-docs"
 
     def test_drops_punctuation(self) -> None:
-        assert branch_name("ENG-1", "Don't crash on empty input!") == "eng-1-don-t-crash-on-empty-input"
+        assert run_name("ENG-1", "don't crash on empty input!") == "eng-1-don-t-crash-on-empty"
 
-    def test_truncates_a_long_title(self) -> None:
-        assert branch_name("ENG-1", "a b c d e f g h i") == "eng-1-a-b-c-d-e-f"
+    def test_caps_a_rambling_descriptor(self) -> None:
+        """A name has to stay readable in the sidebar and short enough to be a legal directory."""
+        name = run_name("ENG-1", "a b c d e f g h i j k l m n o p")
+        assert name == "eng-1-a-b-c-d-e"
 
-    def test_an_empty_title_leaves_just_the_key(self) -> None:
-        assert branch_name("ENG-1", "") == "eng-1"
+    def test_trims_a_name_that_got_cut_on_a_filler_word(self) -> None:
+        """`cb-295-add-a-doc-about-our` was a real branch name, and reads as if it got cut off."""
+        assert run_name("CB-295", "", "Add a doc about our managed spaces") == "cb-295-add-a-doc"
 
-    def test_workspace_is_named_for_the_issue(self) -> None:
-        assert workspace_base_name("ENG-123") == "ENG-123"
+    def test_never_trims_away_the_only_word(self) -> None:
+        assert run_name("ENG-1", "", "The") == "eng-1-the"
+
+    def test_a_descriptor_of_only_punctuation_falls_back(self) -> None:
+        assert run_name("ENG-1", "!!! ???", "Fix the thing") == "eng-1-fix-the-thing"
+
+    def test_the_issue_key_is_lowercased_for_git(self) -> None:
+        """Refs are case-sensitive and people are not, so the name is lower-case throughout."""
+        assert run_name("CB-295", "docs") == "cb-295-docs"
+
+
+class TestDescriptorSlug:
+    def test_prefers_the_descriptor(self) -> None:
+        assert descriptor_slug("add-managed-spaces-docs", "Some Title") == "add-managed-spaces-docs"
+
+    def test_uses_the_title_only_when_the_descriptor_is_unusable(self) -> None:
+        assert descriptor_slug("", "Some Title") == "some-title"
 
 
 class TestParseChoice:
     def test_reads_a_plain_json_reply(self) -> None:
         choice = parse_choice(
-            '{"repo": "md-notes", "confidence": 0.9, "alternatives": [], "reasoning": "notes label"}', REPOS
+            '{"repo": "md-notes", "confidence": 0.9, "alternatives": [], "reasoning": "notes label",'
+            ' "slug": "fix-editor-dropped-keystroke"}',
+            REPOS,
         )
         assert (choice.repo, choice.confidence, choice.reasoning) == ("md-notes", 0.9, "notes label")
+        assert choice.slug == "fix-editor-dropped-keystroke"
+
+    def test_a_reply_without_a_slug_still_parses(self) -> None:
+        """Naming falls back to the title, so a missing slug must not fail the whole resolution."""
+        assert parse_choice('{"repo": "md-notes", "confidence": 0.9}', REPOS).slug == ""
 
     def test_digs_the_json_out_of_surrounding_prose(self) -> None:
         reply = 'Sure!\n```json\n{"repo": "backup", "confidence": 0.8}\n```\nHope that helps.'
@@ -99,3 +140,8 @@ class TestPrompt:
 
     def test_includes_the_labels_it_is_told_to_weigh(self) -> None:
         assert "Labels: notes" in build_prompt(ISSUE, REPOS)
+
+    def test_asks_for_a_slug_naming_the_work(self) -> None:
+        prompt = build_prompt(ISSUE, REPOS)
+        assert '"slug"' in prompt
+        assert "names the *work*, not the issue" in prompt
