@@ -1,6 +1,6 @@
 import { Show, createSignal, onCleanup, onMount } from 'solid-js';
 
-import { workspaceStatus } from '../store';
+import { workspaceAgent, workspaceStatus } from '../store';
 
 /** Long enough that running the mouse down the sidebar doesn't trail cards behind it. */
 const HOVER_DELAY_MS = 180;
@@ -28,6 +28,30 @@ export function headline(status) {
     default:
       return status.state;
   }
+}
+
+/** What an agent's state is called in front of a person. */
+export function agentHeadline(agent) {
+  switch (agent?.state) {
+    case 'working':
+      return 'Claude is working';
+    case 'waiting':
+      return 'Claude is waiting for you';
+    case 'idle':
+      return 'Claude is here, idle';
+    default:
+      return '';
+  }
+}
+
+/** Rough age of a unix timestamp — the card only ever wants the order of magnitude. */
+function ago(since) {
+  const seconds = Math.max(0, Date.now() / 1000 - since);
+  if (seconds < 60) return 'just now';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  return hours < 24 ? `${hours} h` : `${Math.round(hours / 24)} d`;
 }
 
 /** How the working tree splits up, when there's more to say than the headline already said. */
@@ -63,6 +87,20 @@ function StatusCard(props) {
         <span class={`status-dot state-${status()?.state || 'unknown'}`} />
         <span class="ws-card-title">{headline(status())}</span>
       </div>
+
+      <Show when={props.agent}>
+        <div class="ws-card-row ws-agent-line">
+          <span class={`agent-dot state-${props.agent.state}`} />
+          <span>{agentHeadline(props.agent)}</span>
+          <span class="ws-dim"> · {ago(props.agent.since)}</span>
+          <Show when={props.agent.agents > 1}>
+            <span class="ws-dim"> · {props.agent.agents} sessions</span>
+          </Show>
+        </div>
+        <Show when={props.agent.state !== 'working' && props.agent.message}>
+          <div class="ws-card-row ws-subject ws-dim">“{props.agent.message}”</div>
+        </Show>
+      </Show>
 
       <Show when={status()}>
         <Show when={status().branch || status().head}>
@@ -124,6 +162,7 @@ export function WorkspaceStatusDot(props) {
   let timer;
 
   const status = () => workspaceStatus(props.workspace.id);
+  const agent = () => workspaceAgent(props.workspace.id);
   const clear = () => clearTimeout(timer);
   onCleanup(clear);
 
@@ -149,11 +188,26 @@ export function WorkspaceStatusDot(props) {
         <StatusCard
           anchor={anchor()}
           status={status()}
+          agent={agent()}
           path={props.workspace.path}
           onClose={() => setAnchor(null)}
         />
       </Show>
     </span>
+  );
+}
+
+/** The agent's own dot, beside the git one. Shown only while a session is working or waiting —
+ *  an idle Claude sitting at its prompt is not news, and the rail is 220px wide. */
+export function WorkspaceAgentDot(props) {
+  const agent = () => workspaceAgent(props.workspace.id);
+  return (
+    <Show when={agent()?.state === 'working' || agent()?.state === 'waiting'}>
+      <span
+        class={`agent-dot state-${agent().state}`}
+        aria-label={`${props.workspace.name}: ${agentHeadline(agent())}`}
+      />
+    </Show>
   );
 }
 

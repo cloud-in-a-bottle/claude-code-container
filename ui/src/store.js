@@ -13,6 +13,10 @@ const SIDEBAR_HIDDEN_KEY = 'workbench.sidebarHidden';
  *  but this is still `git` on a one-core container shared with the Claude sessions. */
 const STATUS_POLL_MS = 10000;
 
+/** Agent state costs a few small file reads rather than a `git` process, and "is it working right
+ *  now" is only worth showing if it keeps up, so it gets its own faster poll. */
+const AGENT_POLL_MS = 3000;
+
 const [state, setState] = createStore({
   projects: [],
   /** Terminals of the active workspace only — switching workspaces replaces this wholesale.
@@ -24,6 +28,8 @@ const [state, setState] = createStore({
   /** Git status of every workspace, keyed by workspace id — what the sidebar's dots read. Filled
    *  by a poll, so a workspace is missing from it until the first one lands. */
   status: {},
+  /** What Claude is doing, keyed by workspace id. Only workspaces with a live session appear. */
+  agents: {},
   ready: false,
 });
 
@@ -85,19 +91,40 @@ export function workspaceStatus(workspaceId) {
   return state.status[workspaceId];
 }
 
+export async function refreshAgents() {
+  const agents = await api.listWorkspaceAgents();
+  setState('agents', Object.fromEntries(agents.map((a) => [a.workspace_id, a])));
+}
+
+export function workspaceAgent(workspaceId) {
+  return state.agents[workspaceId];
+}
+
 /** Ask for fresh statuses without waiting on them: a failed refresh only means the dots stay as
- *  they are until the next poll, which is not worth interrupting anyone over. */
+ *  they are until the next poll, which is not worth interrupting anyone over. Worth saying once,
+ *  though -- a rail full of grey dots is otherwise a mystery with nothing in the console. */
+let statusFailureReported = false;
 function refreshStatusSoon() {
-  refreshStatus().catch(() => {});
+  refreshStatus().catch((err) => {
+    if (statusFailureReported) return;
+    statusFailureReported = true;
+    console.warn('could not read workspace status; the sidebar dots may be stale', err);
+  });
 }
 
 /** Keep the status dots current, and only while the page is actually being looked at. A failed
  *  poll leaves the last statuses on screen rather than blanking them; the next tick tries again. */
 function watchStatus() {
   const tick = () => {
-    if (document.visibilityState === 'visible') refreshStatusSoon();
+    if (document.visibilityState !== 'visible') return;
+    refreshStatusSoon();
+    refreshAgents().catch(() => {});
+  };
+  const agentTick = () => {
+    if (document.visibilityState === 'visible') refreshAgents().catch(() => {});
   };
   setInterval(tick, STATUS_POLL_MS);
+  setInterval(agentTick, AGENT_POLL_MS);
   // A tab left in the background misses ticks, so catch up the moment it comes back.
   document.addEventListener('visibilitychange', tick);
   tick();
@@ -208,6 +235,11 @@ export async function deleteWorkspace(workspaceId) {
 
 export async function init() {
   await refreshProjects();
+  // Before the restore below, not after it. Nothing about the sidebar's dots depends on which
+  // workspace is being reopened, while the restore spawns terminals and is the likeliest step
+  // here to fail or to take its time -- and when it did, the poll never started at all and every
+  // dot in the rail stayed grey until someone reloaded the page.
+  watchStatus();
   const params = new URLSearchParams(location.search);
   const known = new Set(state.projects.flatMap((p) => p.workspaces.map((w) => w.id)));
   const wanted = [params.get('workspace'), localStorage.getItem(LAST_WORKSPACE_KEY)].find(
@@ -219,5 +251,4 @@ export async function init() {
     if (wantedTab && state.tabs.some((t) => t.id === wantedTab)) setState('focusTabId', wantedTab);
   }
   setState('ready', true);
-  watchStatus();
 }

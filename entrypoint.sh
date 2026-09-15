@@ -92,6 +92,18 @@ fi
 # -n so an existing symlink is replaced rather than followed.
 ln -sfn /app/claude-home/CLAUDE.md "$HOME/.claude/CLAUDE.md"
 
+# Hooks, so the sidebar can show what each agent is doing. The workbench doesn't run the Claude
+# sessions -- they are `claude` in a PTY, free to start and be killed without telling anyone -- so
+# each session reports its own state through a hook, and the server reads those reports out of
+# ~/.workbench/agent-status. The installer touches only its own five events and leaves the rest of
+# settings.json alone; see claude-home/install_agent_hooks.py.
+if python3 /app/claude-home/install_agent_hooks.py; then
+    echo "[entrypoint] agent status hooks installed in ~/.claude/settings.json"
+else
+    # A workbench with no status dots is a working workbench; one that won't boot is not.
+    echo "[entrypoint] could not install agent status hooks; the sidebar will show git state only" >&2
+fi
+
 # Link every bundled skill into the user's skill dir, replacing whatever is already there. $HOME
 # persists across rebuilds, so without the replace an old link (or a directory shadowing the name)
 # would pin an existing workbench to whatever it first saw. Bundled skill names are therefore

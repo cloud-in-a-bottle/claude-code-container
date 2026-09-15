@@ -19,6 +19,7 @@ from server.projects.seed import seed_projects
 from server.remote_services import refresh_gh_auth_periodically
 from server.remote_services import seed_gh_auth
 from server.remote_services import seed_oh_config
+from server.routes.agents import workspace_agents
 from server.routes.common import NO_CACHE
 from server.routes.editor import editor_proxy
 from server.routes.editor import list_editors
@@ -87,6 +88,7 @@ app = Litestar(
         create_workspace,
         remove_workspace,
         workspace_status,
+        workspace_agents,
         list_tabs,
         create_tab,
         kick_tab_client,
