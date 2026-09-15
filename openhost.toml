@@ -67,7 +67,10 @@ grants = [
 [[services.v2.consumes]]
 service = "github.com/imbue-openhost/openhost-latchkey/services/latchkey"
 shortname = "latchkey"
-version = ">=0.2.0"
+# 0.1.0 is enough: the only endpoint used here is `proxy/<url>`, which it already has. 0.2.0 adds
+# per-account credential status and account selection on proxy calls, and this app names no
+# account -- so requiring it would refuse the provider currently installed for no gain.
+version = ">=0.1.0"
 grants = [
     {scope = "linear-api", permissions = []},
 ]

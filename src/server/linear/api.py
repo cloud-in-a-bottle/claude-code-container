@@ -94,6 +94,12 @@ def _explain_failure(resp: httpx.Response) -> str:
         return "latchkey has no Linear account connected; connect one in the latchkey console"
     if error == "account_required":
         return f"latchkey holds several Linear accounts and needs one named: {body.get('accounts')}"
+    # The router's own refusals arrive in its shape rather than latchkey's, and point at a
+    # different fix: an undeclared shortname or a provider whose version doesn't satisfy this
+    # app's manifest is something to change here, not in latchkey.
+    detail = str(body.get("detail") or "")
+    if detail:
+        return f"the openhost router refused the call ({resp.status_code}): {detail}"
     return f"latchkey returned {resp.status_code}: {body.get('message') or error or resp.text[:200]}"
 
 
