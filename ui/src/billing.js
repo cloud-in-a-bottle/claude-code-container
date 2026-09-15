@@ -6,11 +6,6 @@ export const BILLING_LABELS = {
   subscription: 'Claude subscription',
 };
 
-/** How a workspace's mode reads in a list: short, because it sits in a sidebar row's hover card. */
-export function billingLabel(mode) {
-  return BILLING_LABELS[mode] || mode;
-}
-
 /** The problem with picking `mode` right now, or '' when there isn't one.
  *
  * Both modes can be selected before their credentials exist — a workspace whose Claude comes up

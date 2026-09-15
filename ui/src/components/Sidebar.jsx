@@ -1,6 +1,5 @@
 import { For, Show, createSignal } from 'solid-js';
 
-import { billingLabel } from '../billing';
 import { deleteProject, deleteWorkspace, openWorkspace, state, toggleSidebar } from '../store';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ProjectDialog } from './ProjectDialog';
@@ -106,11 +105,6 @@ export function Sidebar() {
                             <WorkspaceStatusDot workspace={workspace} />
                             <span class="workspace-name">{workspace.name}</span>
                             <WorkspaceAgentDot workspace={workspace} />
-                            <Show when={workspace.billing === 'subscription'}>
-                              <span class="ws-billing" title={`Billed to your ${billingLabel('subscription')}`}>
-                                sub
-                              </span>
-                            </Show>
                             <WorkspaceSync workspace={workspace} />
                             <button
                               class="row-btn danger"

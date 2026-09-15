@@ -547,7 +547,7 @@ def test_an_unknown_billing_mode_is_rejected_before_anything_is_made(
 def test_the_project_list_says_how_each_workspace_is_billed(
     workbench_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The sidebar marks subscription workspaces, so the answer travels with the workspace."""
+    """The mode is a property of the workspace, so the answer travels with it to any caller."""
     _stub_access(monkeypatch)
     _stub_tabs(monkeypatch)
     store.add_project("r", "https://github.com/o/r.git")
