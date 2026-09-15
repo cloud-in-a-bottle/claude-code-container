@@ -30,6 +30,9 @@ const [state, setState] = createStore({
   status: {},
   /** What Claude is doing, keyed by workspace id. Only workspaces with a live session appear. */
   agents: {},
+  /** Workbench settings — the billing default and what each mode has credentials for. Null until
+   *  the first load lands, which is the settings page's "checking…" state. */
+  settings: null,
   ready: false,
 });
 
@@ -80,6 +83,17 @@ export function takeFocusTab() {
 
 export async function refreshProjects() {
   setState('projects', await api.listProjects());
+}
+
+/** Re-read the settings, including a fresh `claude auth status` probe in the container. */
+export async function refreshSettings() {
+  setState('settings', await api.getSettings());
+}
+
+/** Change the billing mode new workspaces get. Existing workspaces keep what they were made with,
+ *  so this never moves work in progress onto another account. */
+export async function saveDefaultBilling(mode) {
+  setState('settings', await api.saveSettings({ default_billing: mode }));
 }
 
 export async function refreshStatus() {
@@ -204,8 +218,8 @@ export async function deleteProject(projectId) {
   await refreshProjects();
 }
 
-export async function createWorkspace(projectId, name, ref) {
-  const workspace = await api.createWorkspace(projectId, name, ref);
+export async function createWorkspace(projectId, name, ref, billing) {
+  const workspace = await api.createWorkspace(projectId, name, ref, billing);
   await refreshProjects();
   refreshStatusSoon();
   // Creating it already opened its first terminal; adopt that rather than asking for another.
@@ -251,4 +265,7 @@ export async function init() {
     if (wantedTab && state.tabs.some((t) => t.id === wantedTab)) setState('focusTabId', wantedTab);
   }
   setState('ready', true);
+  // Not awaited: it shells out to `claude auth status`, and nothing on screen at this point is
+  // waiting on the answer. The dialogs that need it re-read it when they open.
+  refreshSettings().catch(() => console.warn('could not load the workbench settings'));
 }

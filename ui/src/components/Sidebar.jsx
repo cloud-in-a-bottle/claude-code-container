@@ -1,8 +1,10 @@
 import { For, Show, createSignal } from 'solid-js';
 
+import { billingLabel } from '../billing';
 import { deleteProject, deleteWorkspace, openWorkspace, state, toggleSidebar } from '../store';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ProjectDialog } from './ProjectDialog';
+import { SettingsDialog } from './SettingsDialog';
 import { WorkspaceDialog } from './WorkspaceDialog';
 import { WorkspaceAgentDot, WorkspaceStatusDot, WorkspaceSync } from './WorkspaceStatus';
 
@@ -41,6 +43,14 @@ export function Sidebar() {
           <span id="sidebar-title">Projects</span>
           <button id="add-project" type="button" title="Add a project" onClick={() => setDialog({ kind: 'project' })}>
             +
+          </button>
+          <button
+            id="workbench-settings"
+            type="button"
+            title="Settings: billing and Claude auth"
+            onClick={() => setDialog({ kind: 'settings' })}
+          >
+            &#9881;
           </button>
           <button id="sidebar-collapse" type="button" title="Hide the sidebar" onClick={toggleSidebar}>
             &#8676;
@@ -96,6 +106,11 @@ export function Sidebar() {
                             <WorkspaceStatusDot workspace={workspace} />
                             <span class="workspace-name">{workspace.name}</span>
                             <WorkspaceAgentDot workspace={workspace} />
+                            <Show when={workspace.billing === 'subscription'}>
+                              <span class="ws-billing" title={`Billed to your ${billingLabel('subscription')}`}>
+                                sub
+                              </span>
+                            </Show>
                             <WorkspaceSync workspace={workspace} />
                             <button
                               class="row-btn danger"
@@ -119,6 +134,9 @@ export function Sidebar() {
 
       <Show when={dialog()?.kind === 'project'}>
         <ProjectDialog project={dialog().project} onClose={() => setDialog(null)} />
+      </Show>
+      <Show when={dialog()?.kind === 'settings'}>
+        <SettingsDialog onClose={() => setDialog(null)} />
       </Show>
       <Show when={dialog()?.kind === 'workspace'}>
         <WorkspaceDialog project={dialog().project} onClose={() => setDialog(null)} />

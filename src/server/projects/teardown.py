@@ -1,3 +1,4 @@
+from server import billing
 from server.editor import instances as editor_instances
 from server.projects.workspaces import Workspace
 from server.projects.workspaces import delete_workspace
@@ -18,4 +19,7 @@ async def teardown_workspace(workspace: Workspace) -> None:
         kill_tab(tab)
     await editor_instances.stop(workspace.id)
     editor_instances.forget_workspace(workspace.id)
+    # Dropped here rather than in the route, so the file doesn't keep a billing row for every
+    # workspace an automated run has been and gone with.
+    billing.forget_workspace(workspace.id)
     delete_workspace(workspace)

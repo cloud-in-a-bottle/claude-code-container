@@ -9,12 +9,13 @@ from pathlib import Path
 import attr
 import httpx
 
+from server.billing import apply_env_overlay
+from server.billing import workspace_auth_env
 from server.editor import paths
 from server.editor import settings
 from server.editor.extensions import ensure_default_extensions
 from server.editor.install import ensure_installed
 from server.projects.workspaces import Workspace
-from server.remote_services import get_anthropic_key
 
 # How many code-server instances may run at once. Each one costs 200 MB idle and up to ~1 GB with a
 # browser attached, in a container with 4 GB and one core, alongside the Claude sessions that are
@@ -206,9 +207,9 @@ async def start(workspace: Workspace) -> EditorInstance:
         # code-server's integrated terminals inherit this, and they want the same renderer the
         # workbench's own terminals do -- see the note in tabs.create_server_tab.
         env["CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN"] = "1"
-        key = await get_anthropic_key()
-        if key:
-            env["ANTHROPIC_API_KEY"] = key
+        # code-server's integrated terminals are another place `claude` gets run, so they are
+        # billed the way their workspace is.
+        apply_env_overlay(env, await workspace_auth_env(workspace.id))
 
         proc = await asyncio.create_subprocess_exec(
             *_command(binary, workspace, sock, data_dir),

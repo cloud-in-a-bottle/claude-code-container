@@ -12,18 +12,20 @@ import subprocess
 import termios
 import uuid
 from collections.abc import Iterator
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 import attr
 from litestar import WebSocket
 
+from server.billing import apply_env_overlay
+from server.billing import workspace_auth_env
 from server.claude_launch import claude_session_command
 from server.claude_sessions import latest_session_id
 from server.config import HOME
 from server.projects.workspaces import Workspace
 from server.projects.workspaces import parse_workspace_id
-from server.remote_services import get_anthropic_key
 from server.signals import reset_child_signals
 from server.tab_store import CLAUDE
 from server.tab_store import SHELL
@@ -298,7 +300,7 @@ async def create_server_tab(
     *,
     command: list[str],
     cwd: str | None = None,
-    env: dict[str, str] | None = None,
+    env: Mapping[str, str | None] | None = None,
     stdin_seed: str = "",
     label: str | None = None,
     kind: str = SHELL,
@@ -311,6 +313,9 @@ async def create_server_tab(
     A bootstrap script that clones a repo and then launches Claude is kind=CLAUDE: restoring it
     re-enters the conversation rather than cloning again. `tab_id` is only passed when restoring,
     so a client holding a ?tab= link still resolves after a restart.
+
+    `env` is an overlay on the workbench's own environment, where a None value *removes* a
+    variable — which is how a subscription-billed tab sheds an inherited ANTHROPIC_API_KEY.
     """
     global _tab_counter
     _tab_counter += 1
@@ -337,8 +342,8 @@ async def create_server_tab(
         # scrolled and some didn't. Set on every tab, not just Claude ones: a shell tab is a place
         # someone runs `claude` by hand.
         "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN": "1",
-        **(env or {}),
     }
+    apply_env_overlay(merged_env, env or {})
     proc = subprocess.Popen(  # noqa: S603
         command,
         stdin=slave_fd,
@@ -461,8 +466,6 @@ async def restore_tabs() -> list[ServerTab]:
     if not persisted:
         return []
 
-    key = await get_anthropic_key()
-    env: dict[str, str] = {"ANTHROPIC_API_KEY": key} if key else {}
     claude_bin = shutil.which("claude") or "claude"
 
     restored: list[ServerTab] = []
@@ -483,7 +486,7 @@ async def restore_tabs() -> list[ServerTab]:
                 await create_server_tab(
                     command=restore_command(entry.kind, claude_bin, entry.session_id, continue_ok=cwd_ok),
                     cwd=entry.cwd if cwd_ok else str(workspace.path),
-                    env=env,
+                    env=await workspace_auth_env(entry.workspace_id),
                     label=entry.label,
                     kind=entry.kind,
                     tab_id=entry.id,
@@ -551,18 +554,18 @@ def tabs_for_workspace(workspace_id: str) -> list[ServerTab]:
 async def new_tab_in_workspace(workspace: Workspace, label: str | None = None) -> ServerTab:
     """Open a tab in a workspace. The workspace's first tab runs Claude; the rest are plain bash."""
     cwd = str(workspace.path)
+    env = await workspace_auth_env(workspace.id)
     live = [t for t in tabs_for_workspace(workspace.id) if t.alive]
     if live:
         return await create_server_tab(
             command=["bash", "-l"],
             cwd=cwd,
+            env=env,
             label=label,
             kind=SHELL,
             workspace_id=workspace.id,
         )
 
-    key = await get_anthropic_key()
-    env: dict[str, str] = {"ANTHROPIC_API_KEY": key} if key else {}
     claude_bin = shutil.which("claude") or "claude"
     # Prefer the conversation this workspace already has. Reaching here with one on disk means the
     # tab list was lost while the transcript survived -- the tab list is the fragile half, since it

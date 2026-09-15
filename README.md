@@ -8,6 +8,8 @@ You work in **projects** and **workspaces** — see [Projects and workspaces](#p
 
 - `@anthropic-ai/claude-code` (npm, installed at image build time). It runs in whichever workspace you opened it from. By default, `claude` is aliased with `--dangerously-skip-permissions` in this sandbox, and the folder-trust dialog is skipped so a new workspace opens straight into the conversation.
 - Python 3 + git + the usual tools.
+- Either way of paying for Claude: an `ANTHROPIC_API_KEY` from the secrets app, or your Claude
+  subscription via `claude auth login`. Chosen per workspace — see [Billing](#billing-api-key-or-claude-subscription).
 - A clone of `https://github.com/imbue-openhost/openhost` placed at `~/openhost` on first container start (override with `OPENHOST_REPO_URL` or `OPENHOST_DIR` env vars).
 - A Claude Code skill at `~/.claude/skills/openhost/` that points Claude at the curated docs in the local openhost clone.
 - Global Claude instructions at `~/.claude/CLAUDE.md`, which Claude reads in every workspace. It's a symlink to `claude-home/CLAUDE.md` in this repo, so app updates ship new text automatically. Your own additions go in `~/.claude/CLAUDE.local.md`, which the bundled file imports and the entrypoint never overwrites (an existing `~/.claude/CLAUDE.md` is moved there on first start rather than replaced).
@@ -108,6 +110,39 @@ If the remote can't be reached, the bootstrap says so and falls back to the mirr
 
 Deleting a workspace deletes the directory and kills its terminals, and is not recoverable. Removing a project forgets it and deletes its mirror, but refuses while it still has workspaces — those hold your work.
 
+### Billing: API key or Claude subscription
+
+Claude Code can bill either an Anthropic API key or a Claude subscription, and the workbench lets
+you pick **per workspace**, in the dialog that creates it. The choice is then fixed for that
+workspace: a workspace is where the work and the conversations live, so changing the workbench
+default later never moves existing ones onto another account. The sidebar marks subscription
+workspaces with a small `sub` tag.
+
+Everything a workspace starts is billed the same way — its Claude tabs, its plain shell tabs (a
+shell is a place you run `claude` by hand), and the terminals inside its VS Code panel.
+
+The gear in the sidebar head opens **Settings**, which holds the default for new workspaces and
+says whether each mode has anything to bill to:
+
+- **API key** — `ANTHROPIC_API_KEY`, fetched from the secrets app at startup (or exported by hand
+  in a terminal). This is the default, because it needs no interactive setup.
+- **Claude subscription** — run `claude auth login` in any terminal once and follow the link it
+  prints. Credentials land in `~/.claude`, which is on the persistent data dir, so it survives
+  redeploys. Settings reports what `claude auth status` says, and re-reads it on **Check again**.
+
+Either mode can be chosen before its credentials exist: the dialog warns, and a workspace whose
+Claude comes up asking to be logged in is a recoverable situation, not a broken one.
+
+How it reaches a process is worth knowing if you touch this code: subscription mode *removes*
+`ANTHROPIC_API_KEY` from the environment a tab inherits rather than merely not setting it. Claude
+Code prefers a key over stored subscription credentials, so a key the container happens to carry
+would otherwise bill the API account while the UI said "subscription". That is why a tab's env
+overlay can carry `None` (see `src/server/billing.py` and `create_server_tab`).
+
+```
+~/.workbench/billing.json   the default mode, plus the mode each workspace was created with
+```
+
 ### The API behind it
 
 ```
@@ -115,10 +150,12 @@ GET    /api/projects                          projects, each with its workspaces
 POST   /api/projects        {repo_url, name?, setup?, default_branch?}
 PATCH  /api/projects/{id}   {name?, setup?, default_branch?}
 DELETE /api/projects/{id}
-POST   /api/workspaces      {project_id, name?, ref?}
+POST   /api/workspaces      {project_id, name?, ref?, billing?}
 DELETE /api/workspaces/{project}/{workspace}
 GET    /api/workspaces/status                 git status of every workspace, in one call
 GET    /api/workspaces/agents                 what Claude is doing in each workspace
+GET    /api/settings                          billing default, and what each mode can bill to
+POST   /api/settings        {default_billing}
 ```
 
 ## The UI

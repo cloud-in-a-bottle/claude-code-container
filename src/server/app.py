@@ -36,6 +36,8 @@ from server.routes.projects import delete_project
 from server.routes.projects import list_projects
 from server.routes.projects import remove_workspace
 from server.routes.projects import update_project
+from server.routes.settings import get_settings
+from server.routes.settings import update_settings
 from server.routes.status import workspace_status
 from server.routes.tabs import create_tab
 from server.routes.tabs import delete_tab
@@ -81,6 +83,8 @@ app = Litestar(
         index,
         get_ui_settings,
         update_ui_settings,
+        get_settings,
+        update_settings,
         list_projects,
         create_project,
         update_project,

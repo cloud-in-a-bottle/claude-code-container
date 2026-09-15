@@ -2,11 +2,11 @@ import shlex
 import shutil
 import sys
 
+from server.billing import workspace_auth_env
 from server.claude_launch import claude_session_command
 from server.projects.store import Project
 from server.projects.workspaces import Workspace
 from server.projects.workspaces import mirror_path
-from server.remote_services import get_anthropic_key
 from server.tab_store import CLAUDE
 from server.tabs import ServerTab
 from server.tabs import create_server_tab
@@ -55,7 +55,7 @@ async def start_workspace_tab(
     empty for a workspace someone created themselves, which then opens an idle Claude as before.
     """
     session_id = new_session_id()
-    env = {
+    env: dict[str, str | None] = {
         "WS_PATH": str(workspace.path),
         "WS_REPO": project.repo_url,
         "WS_MIRROR": str(mirror_path(project.id)),
@@ -65,9 +65,9 @@ async def start_workspace_tab(
     }
     if github_token:
         env["WS_GITHUB_TOKEN"] = github_token
-    key = await get_anthropic_key()
-    if key:
-        env["ANTHROPIC_API_KEY"] = key
+    # The workspace's billing mode is pinned before this runs, so the bootstrap hands Claude the
+    # same auth every later tab in the workspace will get.
+    env.update(await workspace_auth_env(workspace.id))
 
     return await create_server_tab(
         command=bootstrap_command(shutil.which("claude") or "claude", session_id, prompt),

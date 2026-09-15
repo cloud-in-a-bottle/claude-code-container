@@ -9,6 +9,10 @@ from litestar import patch
 from litestar import post
 from litestar.params import FromPath
 
+from server.billing import MODES
+from server.billing import load_billing
+from server.billing import mode_of
+from server.billing import pin_workspace_mode
 from server.git_remote import REF_RE
 from server.git_remote import RepoAccess
 from server.git_remote import repo_dir_name
@@ -43,13 +47,19 @@ _ACCESS_ERRORS = {
 
 
 def project_json(project: Project) -> JsonDict:
+    # Read once for the whole project: a workspace's billing mode comes out of a single file, and
+    # this runs for every workspace of every project on each sidebar refresh.
+    billing = load_billing()
     return {
         "id": project.id,
         "name": project.name,
         "repo_url": project.repo_url,
         "setup": project.setup,
         "default_branch": project.default_branch,
-        "workspaces": [{"id": w.id, "name": w.name, "path": str(w.path)} for w in list_workspaces(project.id)],
+        "workspaces": [
+            {"id": w.id, "name": w.name, "path": str(w.path), "billing": mode_of(billing, w.id)}
+            for w in list_workspaces(project.id)
+        ],
     }
 
 
@@ -166,11 +176,19 @@ async def create_workspace(request: Request[Any, Any, Any]) -> Response[JsonDict
 
     The directory is created here so the workspace shows up immediately; the clone itself runs in
     the tab, where its output (and the project's setup command) is something you can watch.
+
+    `billing` picks how this workspace's Claude sessions are paid for, and is pinned for the life
+    of the workspace; left out, it follows the workbench default from the settings page.
     """
     data = await json_body(request)
     project = find_project(str(data.get("project_id") or ""))
     if project is None:
         return error(404, error="not_found", message="no such project")
+
+    billing = load_billing()
+    mode = str(data.get("billing") or billing.default_mode)
+    if mode not in MODES:
+        return error(400, error="bad_request", message=f"billing must be one of: {', '.join(MODES)}")
 
     ref = str(data.get("ref") or "").strip()
     invalid = _bad_ref(ref, "ref")
@@ -192,10 +210,18 @@ async def create_workspace(request: Request[Any, Any, Any]) -> Response[JsonDict
     name = unique_workspace_name(project.id, requested or ref or "workspace")
     workspace = Workspace(project_id=project.id, name=name)
     create_workspace_dir(workspace)
+    # Before the tab starts, because that is what reads it to build the tab's environment.
+    pin_workspace_mode(workspace.id, mode)
 
     tab = await start_workspace_tab(project, workspace, ref=ref, github_token=access.token)
     return Response(
-        content={"id": workspace.id, "name": workspace.name, "project_id": project.id, "tab": tab_json(tab)}
+        content={
+            "id": workspace.id,
+            "name": workspace.name,
+            "project_id": project.id,
+            "billing": mode,
+            "tab": tab_json(tab),
+        }
     )
 
 

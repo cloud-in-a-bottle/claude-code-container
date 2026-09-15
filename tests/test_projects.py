@@ -10,6 +10,7 @@ from litestar import Litestar
 from litestar.testing import TestClient
 
 from server import app as srv
+from server import billing
 from server import git_remote
 from server.projects import launch
 from server.projects import store
@@ -32,6 +33,16 @@ def clear_tabs() -> Generator[None]:
 def offline_default_branch(monkeypatch: pytest.MonkeyPatch) -> None:
     """No unit test should reach for a real remote. Tests that care stub a real answer back."""
     _stub_default_branch(monkeypatch, "")
+
+
+@pytest.fixture(autouse=True)
+def offline_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Creating a workspace looks up the API key to put in its tab; not from the secrets app here."""
+
+    async def fake() -> str:
+        return "sk-test"
+
+    monkeypatch.setattr(billing, "get_anthropic_key", fake)
 
 
 def _client() -> TestClient[Litestar]:
@@ -477,3 +488,85 @@ def test_delete_workspace_will_not_walk_out_of_its_project(workbench_home: Path)
     resp = _client().delete("/api/workspaces/r/%2E%2E")
     assert resp.status_code == 400
     assert keep.path.is_dir()
+
+
+# ── how a workspace is billed ──────────────────────────────────────────────────
+
+
+def test_a_new_workspace_can_be_created_on_the_subscription(
+    workbench_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The choice is offered per workspace, so it has to reach the tab that workspace starts in."""
+    _stub_access(monkeypatch)
+    created = _stub_tabs(monkeypatch)
+    store.add_project("r", "https://github.com/o/r.git")
+
+    resp = _client().post("/api/workspaces", json={"project_id": "r", "name": "ws", "billing": "subscription"})
+    assert resp.status_code == 200
+    assert resp.json()["billing"] == "subscription"
+    assert billing.workspace_mode("r/ws") == "subscription"
+    # None is create_server_tab's "remove this variable", which is what sheds an inherited key.
+    assert created[0]["env"]["ANTHROPIC_API_KEY"] is None
+
+
+def test_a_new_workspace_defaults_to_the_workbench_setting(
+    workbench_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_access(monkeypatch)
+    created = _stub_tabs(monkeypatch)
+    store.add_project("r", "https://github.com/o/r.git")
+    billing.set_default_mode("subscription")
+
+    resp = _client().post("/api/workspaces", json={"project_id": "r", "name": "ws"})
+    assert resp.json()["billing"] == "subscription"
+    assert created[0]["env"]["ANTHROPIC_API_KEY"] is None
+
+
+def test_an_api_billed_workspace_gets_the_key(workbench_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_access(monkeypatch)
+    created = _stub_tabs(monkeypatch)
+    store.add_project("r", "https://github.com/o/r.git")
+
+    _client().post("/api/workspaces", json={"project_id": "r", "name": "ws", "billing": "api"})
+    assert created[0]["env"]["ANTHROPIC_API_KEY"] == "sk-test"
+
+
+def test_an_unknown_billing_mode_is_rejected_before_anything_is_made(
+    workbench_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_access(monkeypatch)
+    created = _stub_tabs(monkeypatch)
+    store.add_project("r", "https://github.com/o/r.git")
+
+    resp = _client().post("/api/workspaces", json={"project_id": "r", "name": "ws", "billing": "free"})
+    assert resp.status_code == 400
+    assert not (workbench_home / "workspaces" / "r" / "ws").exists()
+    assert created == []
+
+
+def test_the_project_list_says_how_each_workspace_is_billed(
+    workbench_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The sidebar marks subscription workspaces, so the answer travels with the workspace."""
+    _stub_access(monkeypatch)
+    _stub_tabs(monkeypatch)
+    store.add_project("r", "https://github.com/o/r.git")
+    client = _client()
+    client.post("/api/workspaces", json={"project_id": "r", "name": "sub", "billing": "subscription"})
+    client.post("/api/workspaces", json={"project_id": "r", "name": "key", "billing": "api"})
+
+    listed = {w["name"]: w["billing"] for w in client.get("/api/projects").json()[0]["workspaces"]}
+    assert listed == {"sub": "subscription", "key": "api"}
+
+
+def test_deleting_a_workspace_forgets_how_it_was_billed(workbench_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Otherwise the file grows a row per deleted workspace, and a name reused later inherits it."""
+    _stub_access(monkeypatch)
+    _stub_tabs(monkeypatch)
+    store.add_project("r", "https://github.com/o/r.git")
+    _client().post("/api/workspaces", json={"project_id": "r", "name": "ws", "billing": "subscription"})
+    # The workspace's tab has no real process behind it, so the kill is spied rather than run.
+    monkeypatch.setattr(teardown, "kill_tab", lambda t: None)
+
+    assert _client().delete("/api/workspaces/r/ws").status_code == 200
+    assert billing.load_billing().workspaces == {}

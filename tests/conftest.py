@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from server import agent_status
+from server import billing
 from server import claude_sessions
 from server import pasted_images
 from server import remote_services
@@ -54,6 +55,7 @@ _STATE_PATHS: tuple[tuple[Any, str, str], ...] = (
     (agent_status, "AGENT_STATUS_DIR", ".workbench/agent-status"),
     (ui_settings, "UI_SETTINGS_PATH", ".workbench/ui.json"),
     (linear_runs, "RUNS_PATH", ".workbench/linear-runs.json"),
+    (billing, "BILLING_PATH", ".workbench/billing.json"),
     (pasted_images, "PASTED_IMAGES_DIR", ".workbench/pasted-images"),
     (claude_sessions, "CLAUDE_PROJECTS_DIR", ".claude/projects"),
     (remote_services, "GH_HOSTS_PATH", ".config/gh/hosts.yml"),

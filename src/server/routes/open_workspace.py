@@ -7,6 +7,8 @@ from litestar import route
 from litestar.enums import HttpMethod
 from litestar.response import Redirect
 
+from server.billing import default_mode
+from server.billing import pin_workspace_mode
 from server.git_remote import REF_RE
 from server.git_remote import repo_dir_name
 from server.git_remote import resolve_access
@@ -82,6 +84,9 @@ async def open_workspace(request: Request[Any, Any, Any]) -> Response[JsonDict] 
     project = find_project_by_repo(repo) or add_project(name=repo_dir_name(repo), repo_url=repo)
     workspace = Workspace(project_id=project.id, name=unique_workspace_name(project.id, ref))
     create_workspace_dir(workspace)
+    # Nothing in the service contract says how to pay for a workspace, so it gets the workbench
+    # default — pinned now, like any other workspace, so a later change of default leaves it alone.
+    pin_workspace_mode(workspace.id, default_mode())
     tab = await start_workspace_tab(project, workspace, ref=ref, github_token=access.token)
 
     return Redirect(

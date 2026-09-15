@@ -36,8 +36,24 @@
   font-family: ui-monospace, Menlo, monospace;
 }
 .wb-modal input:focus { outline: none; border-color: var(--accent); }
+.wb-modal select {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 4px;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 3px;
+  padding: 5px 8px;
+  font-size: 13px;
+  font-family: inherit;
+}
+.wb-modal select:focus { outline: none; border-color: var(--accent); }
 .wb-modal .wb-hint { color: var(--menu-desc); font-size: 11px; margin: -6px 0 12px; }
 .wb-modal .wb-error { color: var(--danger); font-size: 12px; margin: 0 0 10px; white-space: pre-wrap; }
+/* Says a choice will need attention later, unlike wb-error which says it failed now. */
+.wb-modal .wb-warn { color: var(--status-dirty); font-size: 11px; margin: -4px 0 10px; line-height: 1.5; }
 .wb-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .wb-btn {
   padding: 5px 14px;
@@ -52,3 +68,28 @@
 .wb-btn:hover { background: var(--hover-bg); color: var(--bright); }
 .wb-btn[disabled] { opacity: 0.5; cursor: default; }
 .wb-btn.danger:hover { color: var(--danger); border-color: var(--danger); }
+
+/* The settings page: sections of status rather than a form, on the same dialog chrome. */
+.wb-settings { min-width: 460px; max-width: 520px; }
+.wb-settings section { border-top: 1px solid var(--border); padding-top: 10px; margin-bottom: 12px; }
+.wb-settings section:first-of-type { border-top: none; padding-top: 0; }
+.wb-settings h3 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+  font-weight: 600;
+}
+.wb-settings .wb-hint { margin: 2px 0 0; line-height: 1.55; }
+.wb-settings code {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 3px;
+}
+.wb-status { margin: 0; font-size: 12px; color: var(--muted); }
+.wb-status.good { color: var(--status-clean); }
+.wb-status.bad { color: var(--status-dirty); }

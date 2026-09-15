@@ -1,4 +1,4 @@
-import { Show, createSignal, onCleanup, onMount } from 'solid-js';
+import { For, Show, createSignal, onCleanup, onMount } from 'solid-js';
 
 /** A small centred dialog. Submitting runs `props.onSubmit`, keeps the dialog up while it's in
  *  flight, and shows whatever error it throws instead of closing. */
@@ -46,6 +46,23 @@ export function Modal(props) {
         </div>
       </form>
     </div>
+  );
+}
+
+/** A labelled select for use inside a Modal. `options` is `[{ value, label }]`. */
+export function Choice(props) {
+  return (
+    <>
+      <label>
+        {props.label}
+        <select value={props.value()} onChange={(e) => props.onChange?.(e.currentTarget.value)}>
+          <For each={props.options}>{(option) => <option value={option.value}>{option.label}</option>}</For>
+        </select>
+      </label>
+      <Show when={props.hint}>
+        <p class="wb-hint">{props.hint}</p>
+      </Show>
+    </>
   );
 }
 

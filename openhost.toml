@@ -36,7 +36,9 @@ app_data = true
 
 # Pull ANTHROPIC_API_KEY from the secrets app if it's installed. The fetch is
 # best-effort — if secrets-v2 isn't around or the key isn't set, the terminal
-# still works and the user can `claude login` or export the key by hand.
+# still works: a workspace can be billed to a Claude subscription instead
+# (`claude auth login`, see the Billing section of the README), or the key can be
+# exported by hand.
 [[services.v2.consumes]]
 service = "github.com/imbue-openhost/openhost/services/secrets"
 shortname = "secrets"
