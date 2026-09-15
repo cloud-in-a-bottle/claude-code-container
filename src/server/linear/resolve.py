@@ -24,6 +24,9 @@ class RepoChoice:
     confidence: float
     alternatives: tuple[str, ...]
     reasoning: str
+    # A few words naming the work, for the branch and workspace name. Asked for here rather than in
+    # a call of its own: this one has already read the issue, so the answer is nearly free.
+    slug: str = ""
 
 
 def build_prompt(issue: LinearIssue, repos: OrgRepos) -> str:
@@ -32,8 +35,8 @@ def build_prompt(issue: LinearIssue, repos: OrgRepos) -> str:
     # Only the first few comments: the thread is context for *which repo*, and a long discussion
     # pushes the catalogue out of the model's attention for no gain on that specific question.
     thread = "\n\n".join(issue.comments[:5]) or "(no comments)"
-    return f"""You are routing a Linear issue to the one repository in the GitHub organisation
-`{repos.org}` that the work belongs in.
+    return f"""You are reading a Linear issue to decide two things: which repository in the GitHub
+organisation `{repos.org}` the work belongs in, and what to call the branch it will be done on.
 
 Issue {issue.identifier}: {issue.title}
 Labels: {labels}
@@ -51,7 +54,13 @@ Reply with ONLY a JSON object, no prose and no code fence:
 {{"repo": "<exact repo name from the list>",
   "confidence": <0.0 to 1.0>,
   "alternatives": ["<other plausible repo names>"],
-  "reasoning": "<one sentence>"}}
+  "reasoning": "<one sentence>",
+  "slug": "<3-5 words naming the task, lower-case, hyphen-separated>"}}
+
+The slug names the *work*, not the issue. For "Add a doc about our managed spaces" write
+`add-managed-spaces-docs`, not `add-a-doc-about-our` and not `cb-295`. Drop filler words, keep the
+words someone would recognise the change by, and leave the issue key out of it -- it gets added
+for you.
 
 The labels usually name the area of the project the issue belongs to, so weigh them heavily.
 Set confidence below 0.6 if the issue could plausibly belong to more than one repo, or if nothing
@@ -129,4 +138,7 @@ def parse_choice(reply: str, repos: OrgRepos) -> RepoChoice:
         confidence=confidence,
         alternatives=alternatives,
         reasoning=str(parsed.get("reasoning") or ""),
+        # Left as it came back; `naming` is the one place that decides what a usable slug is, and
+        # it has to sanitise the title fallback anyway.
+        slug=str(parsed.get("slug") or ""),
     )

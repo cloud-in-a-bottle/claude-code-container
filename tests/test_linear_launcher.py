@@ -118,9 +118,20 @@ def tabs(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     return created
 
 
-def _choose(monkeypatch: pytest.MonkeyPatch, repo: str = "md-notes", confidence: float = 0.95) -> None:
+def _choose(
+    monkeypatch: pytest.MonkeyPatch,
+    repo: str = "md-notes",
+    confidence: float = 0.95,
+    slug: str = "fix-dropped-character",
+) -> None:
     async def choose_repo(issue: LinearIssue, repos: OrgRepos) -> RepoChoice:
-        return RepoChoice(repo=repo, confidence=confidence, alternatives=("backup",), reasoning="the notes label")
+        return RepoChoice(
+            repo=repo,
+            confidence=confidence,
+            alternatives=("backup",),
+            reasoning="the notes label",
+            slug=slug,
+        )
 
     monkeypatch.setattr(launcher, "choose_repo", choose_repo)
 
@@ -168,8 +179,8 @@ class TestStartingWork:
         asyncio.run(handle_comment(_event()))
 
         assert [p.repo_url for p in store.load_projects()] == ["https://github.com/cloud-in-a-bottle/md-notes.git"]
-        assert [w.name for w in list_workspaces("md-notes")] == ["ENG-7"]
-        assert tabs[0]["env"]["WS_BRANCH"] == "eng-7-notes-editor-drops-a-character"
+        assert [w.name for w in list_workspaces("md-notes")] == ["eng-7-fix-dropped-character"]
+        assert tabs[0]["env"]["WS_BRANCH"] == "eng-7-fix-dropped-character"
 
     def test_the_opening_prompt_carries_the_issue_and_the_workspace_link(
         self, workbench_home: Path, monkeypatch: pytest.MonkeyPatch, tabs: list[dict[str, Any]]
@@ -182,10 +193,33 @@ class TestStartingWork:
         prompt = tabs[0]["command"][3]
         assert "ENG-7: Notes editor drops a character" in prompt
         assert "only touch the parser" in prompt
-        assert "https://claude-workbench.zone.example.com/?workspace=md-notes/ENG-7" in prompt
+        assert "https://claude-workbench.zone.example.com/?workspace=md-notes/eng-7-fix-dropped-character" in prompt
         # `--agent` matters, not just the command: the comment posts under the owner's own
         # Linear account, so dropping the flag puts their name and avatar on machine output.
         assert "linear comment ENG-7 --agent" in prompt
+
+    def test_the_workspace_is_named_for_the_task_not_just_the_issue(
+        self, workbench_home: Path, monkeypatch: pytest.MonkeyPatch, tabs: list[dict[str, Any]]
+    ) -> None:
+        """The sidebar should read as a list of work in progress, not a list of ticket numbers."""
+        _choose(monkeypatch, slug="add-managed-spaces-docs")
+        asyncio.run(handle_comment(_event()))
+        assert [w.name for w in list_workspaces("md-notes")] == ["eng-7-add-managed-spaces-docs"]
+
+    def test_the_branch_is_the_workspace_name(
+        self, workbench_home: Path, monkeypatch: pytest.MonkeyPatch, tabs: list[dict[str, Any]]
+    ) -> None:
+        """One name for both, so nothing has to be translated from the sidebar to `git branch`."""
+        _choose(monkeypatch, slug="add-managed-spaces-docs")
+        asyncio.run(handle_comment(_event()))
+        assert tabs[0]["env"]["WS_BRANCH"] == list_workspaces("md-notes")[0].name
+
+    def test_falls_back_to_the_title_when_the_resolver_gave_no_slug(
+        self, workbench_home: Path, monkeypatch: pytest.MonkeyPatch, tabs: list[dict[str, Any]]
+    ) -> None:
+        _choose(monkeypatch, slug="")
+        asyncio.run(handle_comment(_event()))
+        assert [w.name for w in list_workspaces("md-notes")] == ["eng-7-notes-editor-drops-a-character"]
 
     def test_records_the_run_so_the_reaper_can_find_its_pr(
         self, workbench_home: Path, monkeypatch: pytest.MonkeyPatch, tabs: list[dict[str, Any]]
@@ -195,9 +229,9 @@ class TestStartingWork:
 
         run = load_runs()[0]
         assert (run.workspace_id, run.repo, run.branch) == (
-            "md-notes/ENG-7",
+            "md-notes/eng-7-fix-dropped-character",
             "cloud-in-a-bottle/md-notes",
-            "eng-7-notes-editor-drops-a-character",
+            "eng-7-fix-dropped-character",
         )
 
     def test_reuses_a_project_that_is_already_registered(
@@ -214,7 +248,15 @@ class TestStartingWork:
         _choose(monkeypatch)
         asyncio.run(handle_comment(_event(comment_id="c1")))
         asyncio.run(handle_comment(_event(comment_id="c2")))
-        assert [w.name for w in list_workspaces("md-notes")] == ["ENG-7", "ENG-7-2"]
+        assert [w.name for w in list_workspaces("md-notes")] == [
+            "eng-7-fix-dropped-character",
+            "eng-7-fix-dropped-character-2",
+        ]
+        # The branch follows the workspace, so the second run can't push over the first's PR.
+        assert [tab["env"]["WS_BRANCH"] for tab in tabs] == [
+            "eng-7-fix-dropped-character",
+            "eng-7-fix-dropped-character-2",
+        ]
 
 
 class TestWhenItWillNotGuess:
