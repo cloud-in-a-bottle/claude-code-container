@@ -288,9 +288,12 @@ def test_status_route_covers_every_workspace_of_every_project(workbench_home: Pa
     assert response.status_code == 200
     body = {entry["workspace_id"]: entry for entry in response.json()}
     assert set(body) == {"one/a", "two/b"}
-    assert body["one/a"]["state"] == git_status.CLEAN
-    assert body["one/a"]["branch"] == "main"
-    assert body["two/b"]["state"] == git_status.CLONING
+    # The route answers with the dot the sidebar draws, and the git reading it was worked out from.
+    assert body["one/a"]["git"]["state"] == git_status.CLEAN
+    assert body["one/a"]["git"]["branch"] == "main"
+    assert body["one/a"]["pull_request"] is None
+    assert body["two/b"]["git"]["state"] == git_status.CLONING
+    assert body["two/b"]["dot"] == git_status.CLONING
 
 
 def test_status_route_with_no_projects_returns_nothing(workbench_home: Path) -> None:

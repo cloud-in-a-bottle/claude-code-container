@@ -16,6 +16,7 @@ from server.editor.settings import apply_theme
 from server.editor.settings import ensure_shared_config
 from server.linear.reaper import reap_periodically
 from server.projects.seed import seed_projects
+from server.pull_requests import refresh_periodically as refresh_pull_requests
 from server.remote_services import refresh_gh_auth_periodically
 from server.remote_services import seed_gh_auth
 from server.remote_services import seed_oh_config
@@ -65,6 +66,9 @@ async def _on_startup() -> None:
     # load already shows them instead of racing to create a fresh one.
     await restore_tabs()
     asyncio.create_task(persist_tabs_periodically())  # noqa: RUF006
+    # Keeps the pull request snapshot the sidebar's dots read from current, out of band, so no
+    # request ever waits on GitHub.
+    asyncio.create_task(refresh_pull_requests())  # noqa: RUF006
     # gh's token is short-lived, so keep re-minting it for as long as the workbench runs.
     asyncio.create_task(refresh_gh_auth_periodically(gh_refresh_delay))  # noqa: RUF006
     # Delete the workspace behind a Linear run once its PR has merged.
