@@ -13,6 +13,10 @@ const SIDEBAR_HIDDEN_KEY = 'workbench.sidebarHidden';
  *  but this is still `git` on a one-core container shared with the Claude sessions. */
 const STATUS_POLL_MS = 10000;
 
+/** Agent state costs a few small file reads rather than a `git` process, and "is it working right
+ *  now" is only worth showing if it keeps up, so it gets its own faster poll. */
+const AGENT_POLL_MS = 3000;
+
 const [state, setState] = createStore({
   projects: [],
   /** Terminals of the active workspace only — switching workspaces replaces this wholesale.
@@ -24,6 +28,8 @@ const [state, setState] = createStore({
   /** Git status of every workspace, keyed by workspace id — what the sidebar's dots read. Filled
    *  by a poll, so a workspace is missing from it until the first one lands. */
   status: {},
+  /** What Claude is doing, keyed by workspace id. Only workspaces with a live session appear. */
+  agents: {},
   ready: false,
 });
 
@@ -85,6 +91,15 @@ export function workspaceStatus(workspaceId) {
   return state.status[workspaceId];
 }
 
+export async function refreshAgents() {
+  const agents = await api.listWorkspaceAgents();
+  setState('agents', Object.fromEntries(agents.map((a) => [a.workspace_id, a])));
+}
+
+export function workspaceAgent(workspaceId) {
+  return state.agents[workspaceId];
+}
+
 /** Ask for fresh statuses without waiting on them: a failed refresh only means the dots stay as
  *  they are until the next poll, which is not worth interrupting anyone over. */
 function refreshStatusSoon() {
@@ -95,9 +110,15 @@ function refreshStatusSoon() {
  *  poll leaves the last statuses on screen rather than blanking them; the next tick tries again. */
 function watchStatus() {
   const tick = () => {
-    if (document.visibilityState === 'visible') refreshStatusSoon();
+    if (document.visibilityState !== 'visible') return;
+    refreshStatusSoon();
+    refreshAgents().catch(() => {});
+  };
+  const agentTick = () => {
+    if (document.visibilityState === 'visible') refreshAgents().catch(() => {});
   };
   setInterval(tick, STATUS_POLL_MS);
+  setInterval(agentTick, AGENT_POLL_MS);
   // A tab left in the background misses ticks, so catch up the moment it comes back.
   document.addEventListener('visibilitychange', tick);
   tick();

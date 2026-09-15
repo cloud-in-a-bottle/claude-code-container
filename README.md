@@ -118,6 +118,7 @@ DELETE /api/projects/{id}
 POST   /api/workspaces      {project_id, name?, ref?}
 DELETE /api/workspaces/{project}/{workspace}
 GET    /api/workspaces/status                 git status of every workspace, in one call
+GET    /api/workspaces/agents                 what Claude is doing in each workspace
 ```
 
 ## The UI

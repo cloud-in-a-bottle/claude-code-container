@@ -37,6 +37,9 @@ export const deleteWorkspace = (workspaceId) =>
 /** Git status for every workspace in one call — see the sidebar's status dots. */
 export const listWorkspaceStatus = () => request('GET', '/api/workspaces/status');
 
+/** What Claude is doing in each workspace, as its own sessions reported it. */
+export const listWorkspaceAgents = () => request('GET', '/api/workspaces/agents');
+
 export const listTabs = (workspaceId) =>
   request('GET', `/api/tabs?workspace=${encodeURIComponent(workspaceId)}`);
 export const createTab = (workspaceId, label) => request('POST', '/api/tabs', { workspace_id: workspaceId, label });

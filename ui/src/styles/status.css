@@ -28,9 +28,27 @@
   animation: ws-pulse 1.4s ease-in-out infinite;
 }
 @keyframes ws-pulse {
-  0%, 100% { opacity: 0.3; }
+  0%, 100% { opacity: 0.5; }
   50% { opacity: 1; }
 }
+
+/* The agent's own glyph. Square, where git's is round: a dirty workspace and a waiting agent are
+ * both amber, and which of the two a dot means should not rest on its colour alone. It also says
+ * something different in kind -- git state is read off the disk and is always true, while this is
+ * whatever the agent last told us. */
+.agent-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  background: var(--faint);
+}
+.agent-dot.state-working { background: var(--accent); animation: ws-pulse 1.4s ease-in-out infinite; }
+.agent-dot.state-waiting { background: var(--status-dirty); }
+.agent-dot.state-idle { background: none; border: 1px solid var(--faint); }
+
+.ws-agent-line { display: flex; align-items: center; gap: 6px; }
 
 /* Ahead/behind lives in the row itself, and steps aside when the row's buttons appear. */
 .ws-sync { display: inline-flex; gap: 3px; font-size: 10px; color: var(--faint); }

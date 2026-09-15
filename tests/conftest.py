@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from server import agent_status
 from server import claude_sessions
 from server import pasted_images
 from server import remote_services
@@ -50,6 +51,7 @@ _STATE_PATHS: tuple[tuple[Any, str, str], ...] = (
     (workspaces, "WORKSPACES_ROOT", "workspaces"),
     (workspaces, "MIRRORS_DIR", ".workbench/mirrors"),
     (tab_store, "TABS_PATH", ".workbench/tabs.json"),
+    (agent_status, "AGENT_STATUS_DIR", ".workbench/agent-status"),
     (ui_settings, "UI_SETTINGS_PATH", ".workbench/ui.json"),
     (linear_runs, "RUNS_PATH", ".workbench/linear-runs.json"),
     (pasted_images, "PASTED_IMAGES_DIR", ".workbench/pasted-images"),
