@@ -15,6 +15,7 @@ from server import tabs
 from server import ui_settings
 from server.editor import paths as editor_paths
 from server.linear import runs as linear_runs
+from server.projects import archive_store
 from server.projects import store
 from server.projects import workspaces
 
@@ -56,6 +57,7 @@ _STATE_PATHS: tuple[tuple[Any, str, str], ...] = (
     (ui_settings, "UI_SETTINGS_PATH", ".workbench/ui.json"),
     (linear_runs, "RUNS_PATH", ".workbench/linear-runs.json"),
     (billing, "BILLING_PATH", ".workbench/billing.json"),
+    (archive_store, "ARCHIVE_PATH", ".workbench/archive.json"),
     (pasted_images, "PASTED_IMAGES_DIR", ".workbench/pasted-images"),
     (claude_sessions, "CLAUDE_PROJECTS_DIR", ".claude/projects"),
     (remote_services, "GH_HOSTS_PATH", ".config/gh/hosts.yml"),

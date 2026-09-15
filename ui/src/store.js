@@ -232,19 +232,52 @@ export async function createWorkspace(projectId, name, ref, billing) {
   return workspace;
 }
 
+/** Stop showing a workspace, because it is going away or being put away. */
+function closeActiveWorkspace(workspaceId) {
+  if (workspaceId !== state.activeWorkspaceId) return;
+  ++switchToken;
+  batch(() => {
+    setState('activeWorkspaceId', '');
+    setState('tabs', []);
+  });
+  localStorage.removeItem(LAST_WORKSPACE_KEY);
+}
+
 export async function deleteWorkspace(workspaceId) {
   await api.deleteWorkspace(workspaceId);
-  if (workspaceId === state.activeWorkspaceId) {
-    ++switchToken;
-    batch(() => {
-      setState('activeWorkspaceId', '');
-      setState('tabs', []);
-    });
-    localStorage.removeItem(LAST_WORKSPACE_KEY);
-  }
+  closeActiveWorkspace(workspaceId);
   localStorage.removeItem(`workbench.layout.${workspaceId}`);
   await refreshProjects();
   refreshStatusSoon();
+}
+
+/** Close everything a workspace is running and move it to the project's archived section. The
+ *  dock layout is deliberately kept: unarchiving reopens the same terminals, and they should come
+ *  back arranged the way they were left. */
+export async function archiveWorkspace(workspaceId) {
+  await api.archiveWorkspace(workspaceId);
+  closeActiveWorkspace(workspaceId);
+  await refreshProjects();
+}
+
+/** Bring an archived workspace back and open it. The terminals the server reopened come straight
+ *  from the response, so this doesn't race a `listTabs` against processes that are still starting. */
+export async function unarchiveWorkspace(workspaceId) {
+  const workspace = await api.unarchiveWorkspace(workspaceId);
+  await refreshProjects();
+  refreshStatusSoon();
+  ++switchToken;
+  batch(() => {
+    setState('activeWorkspaceId', workspaceId);
+    setState('tabs', workspace.tabs);
+  });
+  rememberWorkspace(workspaceId);
+  // An archived workspace with nothing saved in it (archived while it had no terminals) comes back
+  // with none, so give it the Claude tab that opening any empty workspace gets.
+  if (workspace.tabs.length === 0) {
+    const tab = await api.createTab(workspaceId);
+    if (state.activeWorkspaceId === workspaceId) setState('tabs', [tab]);
+  }
 }
 
 export async function init() {
@@ -255,7 +288,11 @@ export async function init() {
   // dot in the rail stayed grey until someone reloaded the page.
   watchStatus();
   const params = new URLSearchParams(location.search);
-  const known = new Set(state.projects.flatMap((p) => p.workspaces.map((w) => w.id)));
+  // Archived ones are excluded: reopening one on a page load would start the very processes
+  // archiving it closed, without anyone asking for that.
+  const known = new Set(
+    state.projects.flatMap((p) => p.workspaces.filter((w) => !w.archived).map((w) => w.id)),
+  );
   const wanted = [params.get('workspace'), localStorage.getItem(LAST_WORKSPACE_KEY)].find(
     (id) => id && known.has(id),
   );

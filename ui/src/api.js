@@ -31,8 +31,16 @@ export const deleteProject = (id) => request('DELETE', `/api/projects/${encodeUR
 
 export const createWorkspace = (projectId, name, ref, billing) =>
   request('POST', '/api/workspaces', { project_id: projectId, name, ref, billing });
-export const deleteWorkspace = (workspaceId) =>
-  request('DELETE', `/api/workspaces/${workspaceId.split('/').map(encodeURIComponent).join('/')}`);
+const workspacePath = (workspaceId) => workspaceId.split('/').map(encodeURIComponent).join('/');
+
+export const deleteWorkspace = (workspaceId) => request('DELETE', `/api/workspaces/${workspacePath(workspaceId)}`);
+
+/** Close everything a workspace is running and file it under the project's archived section. The
+ *  directory is left alone; unarchiving reopens the terminals with their conversations resumed. */
+export const archiveWorkspace = (workspaceId) =>
+  request('POST', `/api/workspaces/${workspacePath(workspaceId)}/archive`);
+export const unarchiveWorkspace = (workspaceId) =>
+  request('POST', `/api/workspaces/${workspacePath(workspaceId)}/unarchive`);
 
 /** Git status for every workspace in one call — see the sidebar's status dots. */
 export const listWorkspaceStatus = () => request('GET', '/api/workspaces/status');
@@ -68,5 +76,4 @@ export const saveSettings = (patch) => request('POST', '/api/settings', patch);
 
 export const listEditors = () => request('GET', '/api/editor');
 export const startEditor = (workspaceId) => request('POST', '/api/editor', { workspace_id: workspaceId });
-export const stopEditor = (workspaceId) =>
-  request('DELETE', `/api/editor/${workspaceId.split('/').map(encodeURIComponent).join('/')}`);
+export const stopEditor = (workspaceId) => request('DELETE', `/api/editor/${workspacePath(workspaceId)}`);

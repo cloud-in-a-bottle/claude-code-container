@@ -27,6 +27,39 @@ class PersistedTab:
     workspace_id: str = ""
 
 
+def tab_to_json(tab: PersistedTab) -> dict[str, str]:
+    return {
+        "id": tab.id,
+        "label": tab.label,
+        "kind": tab.kind,
+        "cwd": tab.cwd,
+        "session_id": tab.session_id,
+        "workspace_id": tab.workspace_id,
+    }
+
+
+def tab_from_json(entry: object) -> PersistedTab | None:
+    """Read one saved tab back, or None for an entry there is nothing to restore from.
+
+    Shared with the archive, which stores the tabs of an archived workspace in this same shape --
+    one format for "a tab, written down", whichever file it was written to.
+    """
+    if not isinstance(entry, dict):
+        return None
+    tab_id = str(entry.get("id", ""))
+    if not tab_id:
+        return None
+    return PersistedTab(
+        id=tab_id,
+        label=str(entry.get("label", "term")),
+        # Anything that isn't a Claude tab restores as a shell, matching restore_command().
+        kind=CLAUDE if entry.get("kind") == CLAUDE else SHELL,
+        cwd=str(entry.get("cwd", HOME)),
+        session_id=str(entry.get("session_id", "")),
+        workspace_id=str(entry.get("workspace_id", "")),
+    )
+
+
 def load_tabs() -> list[PersistedTab]:
     """Read the saved tab list, or [] when there isn't a usable one.
 
@@ -48,39 +81,16 @@ def load_tabs() -> list[PersistedTab]:
 
     loaded: list[PersistedTab] = []
     for entry in raw:
-        if not isinstance(entry, dict):
-            continue
-        tab_id = str(entry.get("id", ""))
-        if not tab_id:
-            continue
-        loaded.append(
-            PersistedTab(
-                id=tab_id,
-                label=str(entry.get("label", "term")),
-                # Anything that isn't a Claude tab restores as a shell, matching restore_command().
-                kind=CLAUDE if entry.get("kind") == CLAUDE else SHELL,
-                cwd=str(entry.get("cwd", HOME)),
-                session_id=str(entry.get("session_id", "")),
-                workspace_id=str(entry.get("workspace_id", "")),
-            )
-        )
+        tab = tab_from_json(entry)
+        if tab is not None:
+            loaded.append(tab)
     return loaded
 
 
 def save_tabs(tabs: list[PersistedTab]) -> None:
     """Persist via a temp file + rename, so an interrupted write can't corrupt the list."""
     TABS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    payload = [
-        {
-            "id": t.id,
-            "label": t.label,
-            "kind": t.kind,
-            "cwd": t.cwd,
-            "session_id": t.session_id,
-            "workspace_id": t.workspace_id,
-        }
-        for t in tabs
-    ]
+    payload = [tab_to_json(t) for t in tabs]
     tmp_path = TABS_PATH.with_name(TABS_PATH.name + ".tmp")
     tmp_path.write_text(json.dumps(payload, indent=2) + "\n")
     tmp_path.replace(TABS_PATH)
