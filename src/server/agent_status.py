@@ -27,6 +27,12 @@ STALE_AFTER_SECONDS = 30 * 60
 # When the file itself is swept up. Long enough to survive a workbench restart with the sidebar
 # intact; short enough that the directory is never more than a day's sessions.
 KEEP_FOR_SECONDS = 24 * 60 * 60
+# How long "working" is believed with nothing behind it. A turn reports when it starts and when it
+# ends, and nothing fires in between -- nor when you interrupt one, which is the case this exists
+# for. Claude Code appends to the transcript at every tool call, so a turn that is really running
+# keeps proving it; past this, one that isn't settles back to idle instead of pulsing forever.
+# Long enough to cover a single slow tool call, short enough that an interrupted turn lets go.
+WORKING_GRACE_SECONDS = 120.0
 
 
 @attr.s(auto_attribs=True, frozen=True)
@@ -38,6 +44,9 @@ class AgentReport:
     cwd: str
     at: float
     message: str = ""
+    # The session's transcript, as the hook was told it. Empty for reports written before this was
+    # recorded, which simply means the report has to stand on its own age.
+    transcript: str = ""
 
 
 @attr.s(auto_attribs=True, frozen=True)
@@ -99,6 +108,28 @@ def read_reports() -> tuple[AgentReport, ...]:
     return tuple(sorted(reports, key=lambda r: r.at, reverse=True))
 
 
+def last_sign_of_life(report: AgentReport) -> float:
+    """The most recent moment this session is known to have done anything."""
+    if not report.transcript:
+        return report.at
+    try:
+        return max(report.at, Path(report.transcript).stat().st_mtime)
+    except OSError:
+        return report.at
+
+
+def settled(report: AgentReport, now: float) -> AgentReport:
+    """Read a `working` report with nothing behind it any more as what it really is.
+
+    The hooks say when a turn starts and when it ends. Nothing fires when one is *interrupted*, so
+    the sidebar would otherwise pulse away at a session that stopped working the moment someone
+    pressed escape -- and, because the workbench still has that session's tab, forever.
+    """
+    if report.state != WORKING or now - last_sign_of_life(report) < WORKING_GRACE_SECONDS:
+        return report
+    return attr.evolve(report, state=IDLE)
+
+
 def is_current(report: AgentReport, live_sessions: frozenset[str], now: float) -> bool:
     """Whether a report still describes something real.
 
@@ -132,6 +163,7 @@ def statuses_for(
     for report in read_reports():
         if not is_current(report, live_sessions, now):
             continue
+        report = settled(report, now)
         workspace = workspace_for(report.cwd, workspaces)
         if workspace is not None:
             by_workspace.setdefault(workspace.id, []).append(report)

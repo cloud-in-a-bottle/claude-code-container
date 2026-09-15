@@ -96,6 +96,12 @@ def test_the_hook_records_the_state_it_was_given(tmp_path: Path) -> None:
     assert float(payload["at"]) == pytest.approx(time.time(), abs=30)
 
 
+def test_the_hook_records_where_the_transcript_is(tmp_path: Path) -> None:
+    """It's the only sign of life a turn gives off between starting and finishing."""
+    run_hook(tmp_path, "working", hook_event())
+    assert written(tmp_path)["transcript"] == f"/somewhere/{SESSION}.jsonl"
+
+
 def test_the_hook_keeps_the_last_thing_the_agent_said(tmp_path: Path) -> None:
     """`Stop` carries it, and the card shows it — an idle agent's last word is the useful part."""
     run_hook(tmp_path, "idle", hook_event(last_assistant_message="done"))
@@ -282,11 +288,14 @@ def test_the_route_reports_per_workspace(workbench_home: Path) -> None:
     ]
 
 
-def test_the_route_believes_a_stale_report_from_a_running_tab(workbench_home: Path) -> None:
+def test_the_route_keeps_a_running_tab_on_the_board(workbench_home: Path) -> None:
+    """A session the workbench still has a tab for is never dropped, however quiet it has gone --
+    but a *working* report that old has clearly stopped working, and settles to idle."""
     store.add_project("proj", "https://example.com/p.git")
     workspace = Workspace(project_id="proj", name="ws")
     workspace.path.mkdir(parents=True)
-    write_report(report("working", str(workspace.path), at=time.time() - 60 * 60 * 24))
+    a_day_ago = time.time() - 60 * 60 * 24
+    write_report(report("idle", str(workspace.path), at=a_day_ago))
     _tabs["t1"] = ServerTab(
         id="t1",
         label="claude",
@@ -296,9 +305,86 @@ def test_the_route_believes_a_stale_report_from_a_running_tab(workbench_home: Pa
         workspace_id=workspace.id,
     )
 
-    assert [s["state"] for s in _client().get("/api/workspaces/agents").json()] == ["working"]
+    assert [s["state"] for s in _client().get("/api/workspaces/agents").json()] == ["idle"]
+
+    write_report(report("working", str(workspace.path), at=a_day_ago))
+    assert [s["state"] for s in _client().get("/api/workspaces/agents").json()] == ["idle"]
 
 
 def test_the_route_is_empty_without_reports(workbench_home: Path) -> None:
     store.add_project("proj", "https://example.com/p.git")
     assert _client().get("/api/workspaces/agents").json() == []
+
+
+# ── a turn that was interrupted ────────────────────────────────────────────────
+
+
+def working(at: float, transcript: str = "") -> AgentReport:
+    return AgentReport(session_id=SESSION, state="working", cwd="/w", at=at, transcript=transcript)
+
+
+def test_a_turn_that_just_started_is_working(workbench_home: Path) -> None:
+    now = time.time()
+    assert agent_status.settled(working(now), now).state == "working"
+
+
+def test_a_working_report_with_nothing_behind_it_settles_to_idle(workbench_home: Path) -> None:
+    """Nothing fires a hook when a turn is interrupted, so "working" has to time out on its own.
+
+    Without this the sidebar pulsed at a session that stopped the moment escape was pressed -- and
+    since the workbench still had its tab, it pulsed forever.
+    """
+    now = time.time()
+    stale = working(now - agent_status.WORKING_GRACE_SECONDS - 1)
+    assert agent_status.settled(stale, now).state == agent_status.IDLE
+
+
+def test_a_long_tool_call_keeps_the_turn_alive(workbench_home: Path) -> None:
+    """Claude Code appends to the transcript at every tool call; that's the heartbeat."""
+    now = time.time()
+    transcript = workbench_home / "transcript.jsonl"
+    transcript.write_text("{}\n")
+    os.utime(transcript, (now - 5, now - 5))
+
+    old_report = working(now - agent_status.WORKING_GRACE_SECONDS - 1, str(transcript))
+    assert agent_status.settled(old_report, now).state == "working"
+
+
+def test_a_transcript_as_stale_as_the_report_does_not_save_it(workbench_home: Path) -> None:
+    now = time.time()
+    transcript = workbench_home / "transcript.jsonl"
+    transcript.write_text("{}\n")
+    long_ago = now - agent_status.WORKING_GRACE_SECONDS - 10
+    os.utime(transcript, (long_ago, long_ago))
+
+    assert agent_status.settled(working(long_ago, str(transcript)), now).state == agent_status.IDLE
+
+
+def test_a_transcript_that_is_gone_leaves_the_report_on_its_own_age(workbench_home: Path) -> None:
+    now = time.time()
+    missing = str(workbench_home / "no-such-transcript.jsonl")
+    assert agent_status.settled(working(now, missing), now).state == "working"
+    assert agent_status.settled(working(now - 10_000, missing), now).state == agent_status.IDLE
+
+
+@pytest.mark.parametrize("state", ["idle", "waiting"])
+def test_the_other_states_are_left_alone(workbench_home: Path, state: str) -> None:
+    """Only "working" claims something is happening right now; the rest are resting states."""
+    old = AgentReport(session_id=SESSION, state=state, cwd="/w", at=time.time() - 10_000)
+    assert agent_status.settled(old, time.time()).state == state
+
+
+def test_an_interrupted_session_stops_showing_as_working(workbench_home: Path) -> None:
+    """End to end: the report a live session left behind no longer lights up its workspace."""
+    workspace = Workspace(project_id="proj", name="ws")
+    write_report(
+        AgentReport(
+            session_id=SESSION,
+            state="working",
+            cwd=str(workspace.path),
+            at=time.time() - agent_status.WORKING_GRACE_SECONDS - 60,
+        )
+    )
+    # Its tab is still running, which is exactly what used to make this permanent.
+    statuses = agent_status.statuses_for((workspace,), frozenset({SESSION}))
+    assert [s.state for s in statuses] == [agent_status.IDLE]
