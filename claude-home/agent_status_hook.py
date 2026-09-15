@@ -50,6 +50,10 @@ def report(state: str, event: dict[str, object]) -> None:
         # Where the agent is working, which is how the server places it in a workspace. Sent by
         # Claude Code itself, so it stays right even if the agent cd'd somewhere else.
         "cwd": str(event.get("cwd", "")),
+        # Claude Code appends to this at every tool call, which is the only sign of life a turn
+        # gives off between its start and its end. The server uses it to tell a turn that is still
+        # running from one that was interrupted, since nothing fires a hook when you press escape.
+        "transcript": str(event.get("transcript_path", "")),
         "at": time.time(),
         "message": message,
     }
