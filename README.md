@@ -115,8 +115,9 @@ Deleting a workspace deletes the directory and kills its terminals, and is not r
 Claude Code can bill either an Anthropic API key or a Claude subscription, and the workbench lets
 you pick **per workspace**, in the dialog that creates it. The choice is then fixed for that
 workspace: a workspace is where the work and the conversations live, so changing the workbench
-default later never moves existing ones onto another account. The sidebar marks subscription
-workspaces with a small `sub` tag.
+default later never moves existing ones onto another account. Which mode a workspace is on isn't
+shown in the rail — `GET /api/projects` reports it per workspace, and `~/.workbench/billing.json`
+is the file behind it.
 
 Everything a workspace starts is billed the same way — its Claude tabs, its plain shell tabs (a
 shell is a place you run `claude` by hand), and the terminals inside its VS Code panel.
