@@ -31,11 +31,13 @@ from server.routes.linear import linear_webhook
 from server.routes.open_workspace import open_workspace
 from server.routes.pages import health
 from server.routes.pages import index
+from server.routes.projects import archive_workspace_route
 from server.routes.projects import create_project
 from server.routes.projects import create_workspace
 from server.routes.projects import delete_project
 from server.routes.projects import list_projects
 from server.routes.projects import remove_workspace
+from server.routes.projects import unarchive_workspace_route
 from server.routes.projects import update_project
 from server.routes.settings import get_settings
 from server.routes.settings import update_settings
@@ -95,6 +97,8 @@ app = Litestar(
         delete_project,
         create_workspace,
         remove_workspace,
+        archive_workspace_route,
+        unarchive_workspace_route,
         workspace_status,
         workspace_agents,
         list_tabs,

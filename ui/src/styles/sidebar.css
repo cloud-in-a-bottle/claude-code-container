@@ -99,3 +99,34 @@ body.sidebar-hidden #sidebar-toggle { display: flex; }
 
 .sidebar-empty { padding: 10px 12px; color: var(--menu-desc); font-size: 12px; line-height: 1.5; }
 .project-empty { padding: 2px 6px 2px 26px; color: var(--menu-desc); font-size: 12px; font-style: italic; }
+
+/* Archived workspaces: still there, nothing running in them. Set apart under their own heading and
+   faded back, so the rail reads as the work in progress plus a shelf underneath it. */
+.archived-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px 3px 12px;
+  cursor: pointer;
+  color: var(--menu-desc);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.archived-head:hover { background: var(--hover-bg); }
+/* Indented by the width of the status dot and its gap, so the names still line up in one column
+   with the live rows above them even though an archived row carries no dots. */
+.workspace-row.archived { color: var(--menu-desc); padding-left: 23px; }
+.workspace-row.archived:hover { color: var(--fg); }
+
+/* An archive or unarchive that failed. Dismissed by clicking it; the next attempt clears it too. */
+.sidebar-error {
+  margin: 8px 8px 0;
+  padding: 6px 8px;
+  border: 1px solid var(--danger);
+  border-radius: 3px;
+  color: var(--danger);
+  font-size: 11px;
+  line-height: 1.4;
+  cursor: pointer;
+}

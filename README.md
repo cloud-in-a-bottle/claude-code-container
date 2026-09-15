@@ -88,6 +88,7 @@ A **project** is a git repo you've told the workbench about: a name, a clone URL
 ~/.workbench/projects.json            the project list
 ~/.workbench/mirrors/<project>.git    one bare mirror per project
 ~/workspaces/<project>/<workspace>/   the workspaces themselves
+~/.workbench/archive.json             which workspaces are archived, and the tabs to bring back
 ```
 
 The mirror is what makes a second workspace cheap: the first one pays for a network clone into the mirror, and every workspace after that is a local clone from it (hardlinked objects, so near-instant and nearly free on disk). Each workspace's `origin` is rewritten to the real remote afterwards, so `git push`, `git pull` and anything reading the remote behave exactly as in an ordinary checkout.
@@ -109,6 +110,18 @@ Workspaces always start at the *newest* commit on that branch. Two things make t
 If the remote can't be reached, the bootstrap says so and falls back to the mirror already on disk. You get a workspace either way; it just may be behind.
 
 Deleting a workspace deletes the directory and kills its terminals, and is not recoverable. Removing a project forgets it and deletes its mirror, but refuses while it still has workspaces — those hold your work.
+
+### Archiving one
+
+A workspace you're done with for now, but not done with, can be **archived**: right-click it in the sidebar and choose *Archive*. That closes everything it is running — every terminal, the Claude sessions inside them, its editor — and moves it into an **Archived** section under its project, collapsible and folded out of the way of the work in progress.
+
+Nothing on disk is touched. The directory, the branch, the uncommitted changes and the Claude transcripts are all exactly where they were; archiving is about processes, not about work. An archived workspace also drops out of the sidebar's polls, so it costs no `git status` and no agent-status reads — which, along with the memory its terminals and editor were holding, is most of what you get back for archiving one.
+
+Unarchive by clicking the row (or right-click → *Unarchive*). The terminals come back as they were — the same tabs, with the same names and in the same dock layout — and each Claude tab resumes the conversation it was in rather than starting a fresh one, because a tab pins its `--session-id` and the archive records it. A terminal sitting in a subdirectory that has since been deleted comes back in the workspace root instead of not at all.
+
+Being archived is a workspace attribute, like its billing mode, and not a second source of truth for which workspaces exist — that is still read off disk. Which is also why an archived workspace refuses to open a terminal or an editor (`409`): it would leave the rail saying "archived" over a workspace that was quietly running again.
+
+Archive and unarchive are each two steps that a crash can land between, so both are ordered to fail towards the same harmless state: the workspace listed as live with nothing open in it, which is indistinguishable from one whose tabs you closed by hand, and which opening it recovers from. That is what lets the startup restore stay ignorant of the archive entirely.
 
 ### Billing: API key or Claude subscription
 
@@ -153,7 +166,9 @@ PATCH  /api/projects/{id}   {name?, setup?, default_branch?}
 DELETE /api/projects/{id}
 POST   /api/workspaces      {project_id, name?, ref?, billing?}
 DELETE /api/workspaces/{project}/{workspace}
-GET    /api/workspaces/status                 git status of every workspace, in one call
+POST   /api/workspaces/{project}/{workspace}/archive     close it down and file it away
+POST   /api/workspaces/{project}/{workspace}/unarchive   reopen its terminals, sessions resumed
+GET    /api/workspaces/status                 git status of every live workspace, in one call
 GET    /api/workspaces/agents                 what Claude is doing in each workspace
 GET    /api/settings                          billing default, and what each mode can bill to
 POST   /api/settings        {default_billing}

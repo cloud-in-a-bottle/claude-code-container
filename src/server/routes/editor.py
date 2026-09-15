@@ -15,6 +15,7 @@ from server.editor import instances
 from server.editor import proxy
 from server.editor.install import CODE_SERVER_VERSION
 from server.editor.install import is_installed
+from server.projects.archive_store import is_archived
 from server.projects.workspaces import parse_workspace_id
 from server.routes.common import JsonDict
 from server.routes.common import error
@@ -53,6 +54,8 @@ async def start_editor(request: Request[Any, Any, Any]) -> Response[JsonDict]:
         return error(400, error="bad_request", message="workspace_id is required")
     if not workspace.path.is_dir():
         return error(404, error="not_found", message=f"no workspace {workspace.id}")
+    if is_archived(workspace.id):
+        return error(409, error="archived", message=f"{workspace.id} is archived; unarchive it first")
 
     try:
         instance = await instances.start(workspace)
