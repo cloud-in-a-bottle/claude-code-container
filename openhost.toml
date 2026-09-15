@@ -62,8 +62,17 @@ grants = [
 ]
 
 # Linear is reached through latchkey, which injects the owner's credentials into outbound calls, so
-# no Linear API key is ever stored in or visible to this app. `linear-api` is detent's built-in
-# scope for api.linear.app; it has no finer-grained permission schemas, so the scope is the grant.
+# no Linear API key is ever stored in or visible to this app.
+#
+# `linear-api` is detent's built-in scope matching api.linear.app, and `any` its schema matching
+# any request. Together they read as "within the Linear API, allow anything" -- which is as narrow
+# as this can be said: Linear is one GraphQL endpoint, so there is no read/write split to ask for,
+# and detent has no permission schemas for it. The scope is what does the confining; a request to
+# anywhere else matches no rule and is refused by default.
+#
+# `permissions` may not be empty. latchkey rejects such a grant outright, and detent would approve
+# nothing under it either -- a rule approves a request only if it matches one of the permissions
+# listed, so an empty list denies everything in scope.
 [[services.v2.consumes]]
 service = "github.com/imbue-openhost/openhost-latchkey/services/latchkey"
 shortname = "latchkey"
@@ -73,5 +82,5 @@ shortname = "latchkey"
 # doesn't meet costs a 503 from the router before the call reaches latchkey at all.
 version = ">=0.1.0"
 grants = [
-    {scope = "linear-api", permissions = []},
+    {scope = "linear-api", permissions = ["any"]},
 ]
