@@ -14,19 +14,34 @@
   height: 7px;
   border-radius: 50%;
   box-sizing: border-box;
-  background: var(--faint);
 }
-.status-dot.state-clean { background: var(--status-clean); }
-.status-dot.state-dirty { background: var(--status-dirty); }
-.status-dot.state-conflicted { background: var(--status-conflict); }
-/* Hollow, so "nothing known yet" and "couldn't be read" can never be mistaken for "clean". */
-.status-dot.state-unknown { background: none; border: 1px solid var(--faint); }
-.status-dot.state-unavailable { background: none; border: 1px solid var(--status-conflict); }
+
+/* These colours are fixed hexes rather than theme variables, and they are GitHub's own: a green
+ * pull request, a purple merge and a red close are things people already read without being told,
+ * and they have to mean the same thing whichever scheme the workbench is wearing.
+ *
+ * The dot answers "how far is this work from done", so everything short of a pull request is the
+ * same yellow -- uncommitted, unpushed and unreviewed are all work still owed. */
+.status-dot.state-untouched { background: none; border: 1px solid var(--faint); }
+.status-dot.state-uncommitted,
+.status-dot.state-unpushed,
+.status-dot.state-unreviewed { background: #d29922; }
+.status-dot.state-pr_open { background: #3fb950; }
+.status-dot.state-pr_merged { background: #a371f7; }
+/* A closed PR and a conflicted merge share red: both mean this work has stopped, and the card
+ * says which. */
+.status-dot.state-pr_closed,
+.status-dot.state-conflicted { background: #f85149; }
+.status-dot.state-unavailable { background: none; border: 1px solid #f85149; }
 .status-dot.state-cloning {
   background: none;
   border: 1px solid var(--accent);
   animation: ws-pulse 1.4s ease-in-out infinite;
 }
+/* Nothing known yet draws nothing at all. An empty circle already means "nothing of its own", so
+ * borrowing it for "haven't heard" would make the commonest quiet state look like a failure. */
+.status-dot.state-unknown { display: none; }
+
 @keyframes ws-pulse {
   0%, 100% { opacity: 0.5; }
   50% { opacity: 1; }
