@@ -101,9 +101,15 @@ export function workspaceAgent(workspaceId) {
 }
 
 /** Ask for fresh statuses without waiting on them: a failed refresh only means the dots stay as
- *  they are until the next poll, which is not worth interrupting anyone over. */
+ *  they are until the next poll, which is not worth interrupting anyone over. Worth saying once,
+ *  though -- a rail full of grey dots is otherwise a mystery with nothing in the console. */
+let statusFailureReported = false;
 function refreshStatusSoon() {
-  refreshStatus().catch(() => {});
+  refreshStatus().catch((err) => {
+    if (statusFailureReported) return;
+    statusFailureReported = true;
+    console.warn('could not read workspace status; the sidebar dots may be stale', err);
+  });
 }
 
 /** Keep the status dots current, and only while the page is actually being looked at. A failed
@@ -229,6 +235,11 @@ export async function deleteWorkspace(workspaceId) {
 
 export async function init() {
   await refreshProjects();
+  // Before the restore below, not after it. Nothing about the sidebar's dots depends on which
+  // workspace is being reopened, while the restore spawns terminals and is the likeliest step
+  // here to fail or to take its time -- and when it did, the poll never started at all and every
+  // dot in the rail stayed grey until someone reloaded the page.
+  watchStatus();
   const params = new URLSearchParams(location.search);
   const known = new Set(state.projects.flatMap((p) => p.workspaces.map((w) => w.id)));
   const wanted = [params.get('workspace'), localStorage.getItem(LAST_WORKSPACE_KEY)].find(
@@ -240,5 +251,4 @@ export async function init() {
     if (wantedTab && state.tabs.some((t) => t.id === wantedTab)) setState('focusTabId', wantedTab);
   }
   setState('ready', true);
-  watchStatus();
 }
