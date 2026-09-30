@@ -2,12 +2,15 @@ FROM ubuntu:26.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# podman runs nested inside this container; crun is named explicitly because it is only a
+# co-dependency of podman's (runc would satisfy it) and nested-podman.sh asks for it by name.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gh glab \
         git tini bash sudo less vim man-db ca-certificates curl wget gnupg \
         nodejs npm \
         htop tree jq ripgrep fd-find fzf tmux ncdu \
         unzip zip file \
+        podman crun \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
@@ -56,15 +59,19 @@ RUN cp /app/workbench.sh /etc/profile.d/workbench.sh \
 # The parts of the repo that rarely move: the entrypoint, the manifest, the docs the workbench
 # points Claude at, the bundled skills, and the global instructions the entrypoint symlinks to
 # ~/.claude/CLAUDE.md.
-COPY entrypoint.sh openhost.toml justfile README.md claude.md style_guide.md ./
+COPY entrypoint.sh nested-podman.sh openhost.toml justfile README.md claude.md style_guide.md ./
 COPY .dockerignore .gitignore .pre-commit-config.yaml Dockerfile ./
 COPY services/ ./services/
 COPY skills/ ./skills/
 COPY claude-home/ ./claude-home/
 # `linear` goes on PATH for every terminal: a Claude working a Linear issue posts back to the issue
-# with it, and it needs no credentials of its own because latchkey injects them.
+# with it, and it needs no credentials of its own because latchkey injects them. `workbench-ns` is
+# for the other direction — something that arrived by `podman exec` from the host and wants the
+# namespace the terminals are in.
 COPY bin/ ./bin/
-RUN chmod +x /app/entrypoint.sh && install -m 0755 /app/bin/linear /usr/local/bin/linear
+RUN chmod +x /app/entrypoint.sh /app/nested-podman.sh \
+    && install -m 0755 /app/bin/linear /usr/local/bin/linear \
+    && install -m 0755 /app/bin/workbench-ns /usr/local/bin/workbench-ns
 
 # The app. `uv sync` installs the project editable, so it points at /app/src rather than copying
 # it, and the server serves its templates and static files from there.

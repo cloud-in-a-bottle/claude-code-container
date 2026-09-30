@@ -13,6 +13,7 @@ You work in **projects** and **workspaces** — see [Projects and workspaces](#p
 - A clone of `https://github.com/imbue-openhost/openhost` placed at `~/openhost` on first container start (override with `OPENHOST_REPO_URL` or `OPENHOST_DIR` env vars).
 - A Claude Code skill at `~/.claude/skills/openhost/` that points Claude at the curated docs in the local openhost clone.
 - Global Claude instructions at `~/.claude/CLAUDE.md`, which Claude reads in every workspace. It's a symlink to `claude-home/CLAUDE.md` in this repo, so app updates ship new text automatically. Your own additions go in `~/.claude/CLAUDE.local.md`, which the bundled file imports and the entrypoint never overwrites (an existing `~/.claude/CLAUDE.md` is moved there on first start rather than replaced).
+- `podman`, which really does run containers from in here, nested inside the rootless podman container the workbench itself is — with some sharp edges. See [Podman inside the workbench](#podman-inside-the-workbench).
 - A checkout of this repo at `~/claude-code-container`, so you can work on the workbench from inside the workbench (override with `WORKBENCH_REPO_URL` or `WORKBENCH_DIR`). See the warning below before editing it.
 
 ### Editing the workbench from inside itself
@@ -30,6 +31,72 @@ Authentication for `claude` is whatever the user sets up inside the terminal —
 `HOME` lives on the app's persistent data dir (`/data/app_data/claude-workbench/home`), so a `claude login`, the openhost clone, and shell history all survive container redeploys. The workbench's own prompt, aliases, and PATH fixups live at `/etc/profile.d/workbench.sh` (sourced by both login and non-login interactive bash), so `~/.bashrc` and `~/.bash_profile` are entirely yours — anything you write there sticks around and is never overwritten by image updates.
 
 As a convenience, if the `secrets-v2` app is installed and `ANTHROPIC_API_KEY` is set there, the workbench fetches it on first PTY launch and exports it into every new terminal's environment. This is best-effort — if the secrets app isn't around the terminal still works, you just have to set the key yourself.
+
+## Podman inside the workbench
+
+`podman` is installed and works in every terminal. `podman run`, `podman build`, volumes, `exec`,
+`logs`, and the Docker-compatible API socket (`podman system service`) all behave normally, so a
+test suite that shells out to podman can run here.
+
+That takes some arranging, because this container is itself a rootless podman container: uid 0 in
+here is an unprivileged host user, and openhost runs the app with `--cap-drop=ALL` and an allowlist
+that does not include `CAP_SYS_ADMIN`. Podman needs to mount things and cannot. So `entrypoint.sh`
+execs the server through [`nested-podman.sh`](nested-podman.sh), which puts the whole workbench
+inside a nested user namespace — its creator holds every capability *inside* it — plus a cgroup
+namespace, whose root is a cgroup2 mount we are actually allowed to write. Every terminal the
+server opens inherits all of it, so every tab shares one podman with one set of images.
+
+### The sharp edges
+
+Three `podman run` defaults are forced in `/etc/containers/containers.conf.d/00-workbench.conf`,
+and overriding them gets you `OCI permission denied` from crun rather than a working container:
+
+| Forced | Why |
+| --- | --- |
+| `--network=host` | A network namespace of our own could not be connected to anything: `veth` needs `CAP_NET_ADMIN` over the namespace above us and `pasta`/`slirp4netns` need `/dev/net/tun`, and openhost gives us neither. Sharing the namespace is also what makes crun bind-mount `/sys` instead of mounting a fresh sysfs, which it likewise may not do. |
+| `--pid=host` | The kernel refuses a fresh procfs mount below the initial user namespace unless a *fully visible* one is already mounted, and the podman that runs us masks `/proc/acpi`, `/proc/kcore` and friends. Those masks are locked mounts — nothing in here can undo them at any privilege level. Containers get the workbench's `/proc` bind-mounted instead, which is only truthful if they share its pid namespace. |
+| `--uts=host` | `sethostname` is refused in here, so a container cannot name its own UTS namespace. |
+
+What that costs in practice:
+
+- **No port publishing.** `-p 8080:80` is discarded with a warning. It is also unnecessary: with
+  host networking a container binds the port directly on the workbench, so `127.0.0.1:<port>` is
+  how you reach it either way. Two containers cannot claim the same port, though.
+- **No podman networks.** No bridge, no container-to-container DNS, no `podman network create`.
+  Containers talk to each other over localhost.
+- **No pid or hostname isolation.** `ps` inside a container shows the workbench's processes.
+- A suite that insists on `-p` or on a private network — openhost's own app test harness, so
+  `just test-integration`, is one — cannot run in here. Run those where podman is not nested.
+- **One level of nesting only.** A container started here can run podman itself, but not one that
+  does what this script does: `/proc` is bind-mounted rather than its own, so its cgroup path reads
+  back as `../../../…` from outside its cgroup namespace and `podman exec`/`stop` on it fail with
+  `cgroup.freeze: No such file or directory`. Building and running the workbench's own image in
+  here works; treating that container as another workbench does not.
+
+Port publishing is the one of these that is not permanent. openhost's manifest allowlists
+`/dev/net/tun` under `[runtime.container] devices`, and with that device `pasta` could give a
+container a network namespace of its own — but only for a *rootless* podman, and the podman in here
+is rootful (uid 0 with every capability in the nested namespace). Getting both would mean running
+podman as a non-root identity that still owns the workbench's files, which is a bigger change than
+a line in the manifest. Not done, and not needed unless something really wants `-p`.
+
+### Images and disk
+
+The graph root is `$HOME/.local/share/containers/storage`, which is on the app's persistent data
+dir: the overlay driver refuses to stack on overlayfs and the container's root filesystem is one, so
+it is the only place that works. Images therefore survive redeploys, and count against the app's
+disk. `podman system prune -a` when it gets big. Set `PODMAN_GRAPHROOT` before the container
+starts to put it somewhere else — anywhere that isn't overlayfs.
+
+### Arriving from outside
+
+A `podman exec` into this container from the host lands in pid 1's namespaces, which are the ones
+openhost gave us — podman does not work there. `workbench-ns` hops into the namespace the terminals
+are in:
+
+```
+podman exec -it openhost-claude-workbench workbench-ns podman ps
+```
 
 ## GitHub auth (`gh`, pushing, private repos)
 

@@ -44,8 +44,10 @@ def test_the_frontend_bundle_is_in_the_image(stack: OpenhostStack) -> None:
         assert response.content, asset
 
 
-def _podman(*args: str) -> str:
-    return subprocess.run(["podman", *args], capture_output=True, text=True, timeout=60, check=True).stdout.strip()
+def _podman(*args: str, timeout: int = 60) -> str:
+    return subprocess.run(
+        ["podman", *args], capture_output=True, text=True, timeout=timeout, check=True
+    ).stdout.strip()
 
 
 def _container_name() -> str:
@@ -109,3 +111,19 @@ def test_a_tab_reports_the_program_its_shell_is_running(stack: OpenhostStack) ->
     """
     program = _podman("exec", _container_name(), "python3", "-c", _PROGRAM_PROBE)
     assert program.splitlines()[-1] == "sleep"
+
+
+def test_podman_can_run_a_container_inside_the_container(stack: OpenhostStack) -> None:
+    """The workbench execs itself into a nested user namespace so that terminals can run podman.
+
+    openhost gives this container neither CAP_SYS_ADMIN nor a cgroup tree it may write, so podman
+    has nowhere to mount an image and nowhere to put a container's cgroup until nested-podman.sh
+    makes both; a container that starts is the only proof that all of it still works. The probe
+    goes in through `workbench-ns` because `podman exec` joins pid 1's namespaces, which are the
+    ones openhost gave us rather than the nested ones every terminal is in.
+    """
+    container = _container_name()
+    # Separate from the run, and generous, because this is the step that reaches the registry.
+    _podman("exec", container, "workbench-ns", "podman", "pull", "-q", "docker.io/library/alpine", timeout=300)
+    output = _podman("exec", container, "workbench-ns", "podman", "run", "--rm", "alpine", "echo", "nested-ok")
+    assert output.splitlines()[-1] == "nested-ok"
