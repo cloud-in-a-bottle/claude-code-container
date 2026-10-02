@@ -18,8 +18,9 @@
 # Two more things have to be arranged from in here:
 #
 #   - Storage. c/storage's overlay driver refuses to stack on overlayfs and our root filesystem is
-#     one, so the graph root goes on the app data dir, which openhost bind-mounts off ext4. Images
-#     therefore survive a redeploy, and count against the app's disk.
+#     one, so the graph root has to go on something openhost bind-mounts in from the host. It goes
+#     on the temp data dir rather than the persistent one: an image store is a cache, and a cache
+#     does not belong in a directory that gets backed up.
 #   - Cgroups. /sys/fs/cgroup arrives read-only and belongs to the namespace above us, so crun has
 #     nowhere to put a container's cgroup. Unsharing a cgroup namespace makes our own cgroup the
 #     root of a fresh cgroup2 mount, which we do own and may write.
@@ -66,11 +67,16 @@ rewrite_subordinate_ids() {
     } > "$file.workbench" && mv "$file.workbench" "$file"
 }
 
-# Both configs are written at every start: the graph root depends on $HOME, which entrypoint.sh
-# repoints at the app data dir, so neither can be baked into the image.
+# Both configs are written at every start: the graph root is a runtime path, so neither can be
+# baked into the image.
 write_configs() {
     local graphroot driver fstype
-    graphroot="${PODMAN_GRAPHROOT:-$HOME/.local/share/containers/storage}"
+    # Images and layers are a cache -- recreatable by a re-pull -- so they go in the temp data dir,
+    # which openhost does not back up, and never in the persistent one. It still has to be a bind
+    # mount from the host: the overlay driver cannot stack on this container's overlayfs root, so
+    # falling back to /var/lib means falling back to vfs as well.
+    graphroot="${PODMAN_GRAPHROOT:-${OPENHOST_APP_TEMP_DIR:+$OPENHOST_APP_TEMP_DIR/containers/storage}}"
+    graphroot="${graphroot:-/var/lib/containers/storage}"
     mkdir -p "$graphroot" || return 1
 
     # overlay is the driver worth having; vfs is the fallback that works anywhere and copies every

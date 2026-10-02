@@ -82,11 +82,21 @@ a line in the manifest. Not done, and not needed unless something really wants `
 
 ### Images and disk
 
-The graph root is `$HOME/.local/share/containers/storage`, which is on the app's persistent data
-dir: the overlay driver refuses to stack on overlayfs and the container's root filesystem is one, so
-it is the only place that works. Images therefore survive redeploys, and count against the app's
-disk. `podman system prune -a` when it gets big. Set `PODMAN_GRAPHROOT` before the container
-starts to put it somewhere else — anywhere that isn't overlayfs.
+The graph root is `$OPENHOST_APP_TEMP_DIR/containers/storage` — `app_temp_data = true` in
+`openhost.toml`, so `/data/app_temp_data/claude-workbench/containers/storage`. An image store is a
+cache, and openhost does not back that directory up or promise to keep it: losing it costs a
+re-pull and nothing else. Images do not survive a redeploy, and they never touch `$HOME`.
+
+It cannot just live in the image, though. The overlay driver refuses to stack on overlayfs and the
+container's root filesystem is one, so the graph root has to be on something openhost bind-mounts
+in from the host. Without the temp dir the script falls back to `/var/lib/containers/storage` and,
+on seeing overlayfs underneath it, to the `vfs` driver — which copies every layer instead of
+stacking them, so it works but is slow and hungry. It says so in the log when it does.
+`PODMAN_GRAPHROOT` overrides the choice; anything that isn't overlayfs will do.
+
+`podman system prune -a` when it gets big. If a graph root ever needs deleting by hand, do it from
+inside the namespace (`workbench-ns podman system reset`) — layer directories are owned by mapped
+subuids, which are only ordinary files from in there.
 
 ### Arriving from outside
 
