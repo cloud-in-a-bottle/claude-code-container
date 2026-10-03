@@ -48,9 +48,7 @@ anything in here make a private network, procfs or hostname. In practice:
 - **One level of nesting.** A container started here can't itself run nested podman like this.
 - Suites that need port publishing — including `just test-integration` — can't run here.
 
-Images live in `$OPENHOST_APP_TEMP_DIR/containers/storage` (`app_temp_data` in `openhost.toml`):
-not backed up, lost on redeploy, never in `$HOME`. Override with `PODMAN_GRAPHROOT` — anything but
-overlayfs, or it falls back to the slow `vfs` driver. Clean up with `podman system prune -a`.
+Images live in `$OPENHOST_APP_TEMP_DIR`.
 
 ## GitHub auth (`gh`, pushing, private repos)
 
