@@ -34,21 +34,32 @@ As a convenience, if the `secrets-v2` app is installed and `ANTHROPIC_API_KEY` i
 
 ## Podman inside the workbench
 
-`podman` works in every terminal: `run`, `build`, volumes, `exec`, `logs`, and the API socket. This
-container is itself a rootless podman container without `CAP_SYS_ADMIN`, so `entrypoint.sh` execs
-the server through [`nested-podman.sh`](nested-podman.sh), which puts the whole workbench in a
+`podman` works in every terminal: `run`, `build`, volumes, `exec`, `logs`, `-p`, and the API socket.
+This container is itself a rootless podman container without `CAP_SYS_ADMIN`, so `entrypoint.sh`
+execs the server through [`nested-podman.sh`](nested-podman.sh), which puts the whole workbench in a
 nested user + cgroup namespace where podman can mount things. Its header explains the details.
 
-Containers are forced onto `--network=host`, `--pid=host` and `--uts=host` — the kernel won't let
-anything in here make a private network, procfs or hostname. In practice:
+Containers get their own network through pasta, and `host.containers.internal` reaches the
+workbench's loopback, the way an openhost app reaches the router. What differs from a normal host:
 
-- **No `-p`.** It's ignored; a container binds ports directly on the workbench, so
-  `127.0.0.1:<port>` reaches it anyway. No `podman network` either.
-- **No pid isolation.** `ps` in a container shows the workbench's processes.
+- **No pid isolation.** Containers are forced onto `--pid=host`; `ps` in one shows the workbench's
+  processes. The kernel won't let anything in here mount a procfs of its own.
+- **Hostnames are cosmetic.** `--hostname` sets `/etc/hostname`, but `uname` reports the workbench's.
+- **No `podman network`** — no bridges. Containers reach each other through published ports.
 - **One level of nesting.** A container started here can't itself run nested podman like this.
-- Suites that need port publishing — including `just test-integration` — can't run here.
 
 Images live in `$OPENHOST_APP_TEMP_DIR`.
+
+An app's openhost integration tests run here, with one catch: the harness's test router reads
+`OPENHOST_*` variables from its environment, and every terminal has the real ones. Until the harness
+stops inheriting them, run the suite without them:
+
+```
+env $(env | grep -oE '^(OPENHOST|BOTTLE)_[A-Z_]+' | sed 's/^/-u /') uv run pytest
+```
+
+This repo's own `just test-integration` is the exception: its tests signal pids 1 and 2 inside the
+container, which with a shared pid namespace are the workbench's own.
 
 ## GitHub auth (`gh`, pushing, private repos)
 
