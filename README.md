@@ -52,13 +52,6 @@ Images live in `$OPENHOST_APP_TEMP_DIR/containers/storage` (`app_temp_data` in `
 not backed up, lost on redeploy, never in `$HOME`. Override with `PODMAN_GRAPHROOT` — anything but
 overlayfs, or it falls back to the slow `vfs` driver. Clean up with `podman system prune -a`.
 
-From the host, `podman exec` lands outside the namespace, where podman doesn't work. Join the
-server's (pid 2) instead:
-
-```
-podman exec -it openhost-claude-workbench nsenter -t 2 -U -m -C --preserve-credentials podman ps
-```
-
 ## GitHub auth (`gh`, pushing, private repos)
 
 The workbench mints a GitHub token through openhost's `oauth-v2` app, and logs `gh` in with it on startup. Every terminal is authenticated — including ones already open — so `gh`, `git push` and private clones just work, with no token in any shell's environment.
