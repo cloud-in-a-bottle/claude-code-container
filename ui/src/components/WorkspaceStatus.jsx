@@ -6,27 +6,39 @@ import { workspaceAgent, workspaceStatus } from '../store';
 const HOVER_DELAY_MS = 180;
 const CARD_GAP = 10;
 
-/** The one-line version of a status: the card's headline, and the dot's accessible name. */
-export function headline(status) {
-  if (!status) return 'reading git status…';
-  switch (status.state) {
-    case 'clean':
-      return 'no local changes';
-    case 'dirty':
-      return [
-        status.changed && `${status.changed} changed`,
-        status.untracked && `${status.untracked} untracked`,
-      ]
+/** The headline of the hover card: what the dot means, in words.
+ *
+ *  The dot answers "how far is this work from done", so the states run in that order — nothing
+ *  here, uncommitted, unpushed, no PR yet, then whatever the PR itself is doing. */
+export function headline(view) {
+  if (!view) return 'reading git status…';
+  const git = view.git || {};
+  const pr = view.pull_request;
+  switch (view.dot) {
+    case 'untouched':
+      return 'nothing of its own yet';
+    case 'uncommitted':
+      return [git.changed && `${git.changed} changed`, git.untracked && `${git.untracked} untracked`]
         .filter(Boolean)
         .join(', ');
+    case 'unpushed':
+      return `${git.ahead} to push`;
+    case 'unreviewed':
+      return 'pushed, no PR yet';
+    case 'pr_open':
+      return `PR #${pr?.number} ${pr?.state === 'draft' ? 'draft' : 'open'}`;
+    case 'pr_merged':
+      return `PR #${pr?.number} merged`;
+    case 'pr_closed':
+      return `PR #${pr?.number} closed`;
     case 'conflicted':
-      return `${status.conflicted} conflicted ${status.conflicted === 1 ? 'file' : 'files'}`;
+      return `${git.conflicted} conflicted ${git.conflicted === 1 ? 'file' : 'files'}`;
     case 'cloning':
       return 'still being created';
     case 'unavailable':
       return 'git status unavailable';
     default:
-      return status.state;
+      return view.dot;
   }
 }
 
@@ -55,13 +67,13 @@ function ago(since) {
 }
 
 /** How the working tree splits up, when there's more to say than the headline already said. */
-function breakdown(status) {
-  return [status.staged && `${status.staged} staged`, status.unstaged && `${status.unstaged} unstaged`]
+function breakdown(git) {
+  return [git.staged && `${git.staged} staged`, git.unstaged && `${git.unstaged} unstaged`]
     .filter(Boolean)
     .join(' · ');
 }
 
-/** The hovering info card. Positioned beside the dot that opened it, clamped to the viewport. */
+/** The hovering info card. Positioned beside the row that opened it, clamped to the viewport. */
 function StatusCard(props) {
   let el;
 
@@ -79,13 +91,14 @@ function StatusCard(props) {
     onCleanup(() => document.removeEventListener('scroll', close, { capture: true }));
   });
 
-  const status = () => props.status;
+  const view = () => props.view;
+  const git = () => props.view?.git || {};
 
   return (
     <div class="ws-card" ref={el} role="tooltip">
       <div class="ws-card-head">
-        <span class={`status-dot state-${status()?.state || 'unknown'}`} />
-        <span class="ws-card-title">{headline(status())}</span>
+        <span class={`status-dot state-${view()?.dot || 'unknown'}`} />
+        <span class="ws-card-title">{headline(view())}</span>
       </div>
 
       <Show when={props.agent}>
@@ -102,52 +115,58 @@ function StatusCard(props) {
         </Show>
       </Show>
 
-      <Show when={status()}>
-        <Show when={status().branch || status().head}>
+      <Show when={view()?.pull_request}>
+        <div class="ws-card-row ws-subject">
+          <span class="ws-dim">#{view().pull_request.number}</span> {view().pull_request.title}
+        </div>
+      </Show>
+
+      <Show when={view()}>
+        <Show when={git().branch || git().head}>
           <div class="ws-card-row">
-            <span class="ws-branch">{status().branch || `detached at ${status().head}`}</span>
-            <Show when={status().upstream}>
-              <span class="ws-dim"> → {status().upstream}</span>
+            <span class="ws-branch">{git().branch || `detached at ${git().head}`}</span>
+            <Show when={git().upstream}>
+              <span class="ws-dim"> → {git().upstream}</span>
             </Show>
           </div>
         </Show>
 
-        <Show when={status().ahead || status().behind}>
+        <Show when={git().ahead || git().behind}>
           <div class="ws-card-row">
-            <Show when={status().ahead}>
-              <span class="ws-ahead">↑{status().ahead}</span> ahead{' '}
+            <Show when={git().ahead}>
+              <span class="ws-ahead">↑{git().ahead}</span> ahead{' '}
             </Show>
-            <Show when={status().behind}>
-              <span class="ws-behind">↓{status().behind}</span> behind
+            <Show when={git().behind}>
+              <span class="ws-behind">↓{git().behind}</span> behind
             </Show>
           </div>
         </Show>
 
-        <Show when={breakdown(status())}>
-          <div class="ws-card-row ws-dim">{breakdown(status())}</div>
+        <Show when={breakdown(git())}>
+          <div class="ws-card-row ws-dim">{breakdown(git())}</div>
         </Show>
 
-        <Show when={status().insertions || status().deletions}>
+        <Show when={git().insertions || git().deletions}>
           <div class="ws-card-row">
-            <Show when={status().insertions}>
-              <span class="ws-add">+{status().insertions}</span>{' '}
+            <Show when={git().insertions}>
+              <span class="ws-add">+{git().insertions}</span>{' '}
             </Show>
-            <Show when={status().deletions}>
-              <span class="ws-del">−{status().deletions}</span>{' '}
+            <Show when={git().deletions}>
+              <span class="ws-del">−{git().deletions}</span>{' '}
             </Show>
             <span class="ws-dim">since the last commit</span>
           </div>
         </Show>
 
-        <Show when={status().subject}>
+        <Show when={git().subject}>
           <div class="ws-card-row ws-subject">
-            <span class="ws-sha">{status().head}</span> {status().subject}
+            <span class="ws-sha">{git().head}</span> {git().subject}
           </div>
-          <div class="ws-card-row ws-dim">committed {status().committed}</div>
+          <div class="ws-card-row ws-dim">committed {git().committed}</div>
         </Show>
 
-        <Show when={status().detail}>
-          <div class="ws-card-row ws-dim">{status().detail}</div>
+        <Show when={git().detail}>
+          <div class="ws-card-row ws-dim">{git().detail}</div>
         </Show>
       </Show>
 
@@ -156,12 +175,12 @@ function StatusCard(props) {
   );
 }
 
-/** The dot at the head of a workspace row: git state at a glance, the rest on hover. */
+/** The dot at the head of a workspace row: how far this work is from done, the rest on hover. */
 export function WorkspaceStatusDot(props) {
   const [anchor, setAnchor] = createSignal(null);
   let timer;
 
-  const status = () => workspaceStatus(props.workspace.id);
+  const view = () => workspaceStatus(props.workspace.id);
   const agent = () => workspaceAgent(props.workspace.id);
   const clear = () => clearTimeout(timer);
   onCleanup(clear);
@@ -181,13 +200,13 @@ export function WorkspaceStatusDot(props) {
       }}
     >
       <span
-        class={`status-dot state-${status()?.state || 'unknown'}`}
-        aria-label={`${props.workspace.name}: ${headline(status())}`}
+        class={`status-dot state-${view()?.dot || 'unknown'}`}
+        aria-label={`${props.workspace.name}: ${headline(view())}`}
       />
       <Show when={anchor()}>
         <StatusCard
           anchor={anchor()}
-          status={status()}
+          view={view()}
           agent={agent()}
           path={props.workspace.path}
           onClose={() => setAnchor(null)}
@@ -197,7 +216,7 @@ export function WorkspaceStatusDot(props) {
   );
 }
 
-/** The agent's own dot, beside the git one. Shown only while a session is working or waiting —
+/** The agent's own glyph, beside the git one. Shown only while a session is working or waiting —
  *  an idle Claude sitting at its prompt is not news, and the rail is 220px wide. */
 export function WorkspaceAgentDot(props) {
   const agent = () => workspaceAgent(props.workspace.id);
@@ -213,15 +232,15 @@ export function WorkspaceAgentDot(props) {
 
 /** How far a workspace has drifted from its upstream, small enough to live in the row itself. */
 export function WorkspaceSync(props) {
-  const status = () => workspaceStatus(props.workspace.id);
+  const git = () => workspaceStatus(props.workspace.id)?.git;
   return (
-    <Show when={status()?.ahead || status()?.behind}>
+    <Show when={git()?.ahead || git()?.behind}>
       <span class="ws-sync">
-        <Show when={status().ahead}>
-          <span class="ws-ahead">↑{status().ahead}</span>
+        <Show when={git().ahead}>
+          <span class="ws-ahead">↑{git().ahead}</span>
         </Show>
-        <Show when={status().behind}>
-          <span class="ws-behind">↓{status().behind}</span>
+        <Show when={git().behind}>
+          <span class="ws-behind">↓{git().behind}</span>
         </Show>
       </span>
     </Show>

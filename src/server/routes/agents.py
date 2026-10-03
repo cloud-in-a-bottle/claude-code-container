@@ -6,6 +6,7 @@ from server.agent_status import KEEP_FOR_SECONDS
 from server.agent_status import WorkspaceAgentStatus
 from server.agent_status import prune_reports
 from server.agent_status import statuses_for
+from server.projects.archive_store import load_archive
 from server.projects.store import load_projects
 from server.projects.workspaces import list_workspaces
 from server.tabs import _tabs
@@ -19,7 +20,10 @@ def workspace_agents() -> tuple[WorkspaceAgentStatus, ...]:
     things: this reads a handful of small files, while git status runs processes. Neither should
     have to wait for the other.
     """
-    workspaces = tuple(w for project in load_projects() for w in list_workspaces(project.id))
+    # Archived workspaces have no live session by construction, so they are left out rather than
+    # reported idle from whatever their last report happened to say.
+    archived = load_archive()
+    workspaces = tuple(w for project in load_projects() for w in list_workspaces(project.id) if w.id not in archived)
     # A session the workbench still has a running tab for is alive however quiet it has gone; see
     # is_current(). Tabs are the only part of this the workbench knows first-hand.
     live_sessions = frozenset(tab.session_id for tab in _tabs.values() if tab.alive and tab.session_id)

@@ -37,12 +37,14 @@ Do the work, then ship it:
 
 5. Comment on the issue so it's known the PR is up:
 
-   linear comment {issue.identifier} "PR is open: <the PR url> — <one line on what you did>"
+   linear comment {issue.identifier} --agent "PR is open: <the PR url> — <one line on what you did>"
 
-   `linear` is on PATH in this container and needs no credentials or setup; it reaches Linear
-   through latchkey. Run `linear --help` if you need the other subcommands.
+   `--agent` marks the comment as machine-written. Keep it on: the comment posts under the owner's
+   own Linear account, so without it a reader sees their name and avatar on something they did not
+   write. `linear` is on PATH in this container and needs no credentials or setup; it reaches
+   Linear through latchkey. Run `linear --help` if you need the other subcommands.
 
 If you cannot do the work — the issue is ambiguous, the repo is the wrong one, the change needs a
-decision only a person can make — do not guess and do not open a PR. Use `linear comment` to say
-what is blocking you, and stop. A question in Linear is a good outcome; a plausible-looking PR that
-solves the wrong problem is not."""
+decision only a person can make — do not guess and do not open a PR. Use
+`linear comment {issue.identifier} --agent` to say what is blocking you, and stop. A question in
+Linear is a good outcome; a plausible-looking PR that solves the wrong problem is not."""

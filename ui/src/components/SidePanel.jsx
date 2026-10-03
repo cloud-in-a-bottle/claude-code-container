@@ -61,12 +61,15 @@ export function SidePanel() {
     queueMicrotask(relayout);
   });
 
-  // The panel is a separate same-origin document, so it can be restyled in place.
+  // The panel's home page is a separate same-origin document, so it can be restyled in place. Only
+  // the workbench's own pages, though: a dev server behind /proxy/ is same-origin too, and its
+  // <html> attributes are its own business.
   createEffect(() => {
     const name = theme();
     if (!frame) return;
     const paint = () => {
       try {
+        if (!frame.contentWindow.location.pathname.startsWith('/static/')) return;
         frame.contentDocument?.documentElement?.setAttribute('data-theme', name);
       } catch (_) {
         /* cross-origin: not ours to touch */

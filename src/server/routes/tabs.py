@@ -11,6 +11,7 @@ from litestar import websocket
 from litestar.params import FromPath
 from litestar.params import FromQuery
 
+from server.projects.archive_store import is_archived
 from server.projects.workspaces import parse_workspace_id
 from server.routes.common import JsonDict
 from server.routes.common import error
@@ -53,6 +54,10 @@ async def create_tab(request: Request[Any, Any, Any]) -> Response[JsonDict]:
         return error(400, error="bad_request", message="workspace_id is required")
     if not workspace.path.is_dir():
         return error(404, error="not_found", message=f"no workspace {workspace.id}")
+    # An archived workspace is one whose processes were deliberately closed. Starting a terminal in
+    # it would leave it archived in the rail and running underneath.
+    if is_archived(workspace.id):
+        return error(409, error="archived", message=f"{workspace.id} is archived; unarchive it first")
 
     label = str(data.get("label") or "").strip() or None
     tab = await new_tab_in_workspace(workspace, label=label)

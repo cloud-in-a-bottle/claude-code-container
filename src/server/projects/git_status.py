@@ -71,6 +71,10 @@ class WorkspaceStatus:
     conflicted: int = 0
     insertions: int = 0
     deletions: int = 0
+    # Commits this checkout has that the repo's default branch doesn't -- the difference between a
+    # workspace carrying work and one still sitting on the branch it was made from. None when it
+    # wasn't worked out: either nothing needed it, or there was no base to compare against.
+    own_commits: int | None = None
     head: str = ""  # short sha of HEAD
     subject: str = ""
     committed: str = ""  # how long ago HEAD was committed, e.g. "2 hours ago"
@@ -143,6 +147,22 @@ def parse_shortstat(shortstat: str) -> tuple[int, int]:
     return (int(insertions.group(1)) if insertions else 0, int(deletions.group(1)) if deletions else 0)
 
 
+async def count_own_commits(cwd: Path) -> int | None:
+    """Commits here that the repo's default branch hasn't got.
+
+    Measured against `origin/HEAD`, which `git clone` points at the remote's own default branch: a
+    workspace still on that branch counts zero, one on a branch of its own counts its work. None
+    when there is no origin/HEAD to compare against, which reads as "can't tell" rather than "none".
+    """
+    rc, out, _err = await run_git(cwd, "rev-list", "--count", "origin/HEAD..HEAD")
+    if rc != 0:
+        return None
+    try:
+        return int(out.strip())
+    except ValueError:
+        return None
+
+
 def first_line(text: str) -> str:
     return text.strip().splitlines()[0].strip() if text.strip() else ""
 
@@ -179,6 +199,11 @@ async def read_status(workspace: Workspace) -> WorkspaceStatus:
     else:
         state = CLEAN
 
+    # Only asked when it can change what the sidebar draws. A clean, fully pushed workspace is
+    # either carrying work nobody has reviewed or has nothing of its own yet, and only this tells
+    # those apart; every other state is decided without it, so it isn't worth the extra process.
+    own_commits = await count_own_commits(workspace.path) if state == CLEAN and not counts.ahead else None
+
     return WorkspaceStatus(
         workspace_id=workspace.id,
         state=state,
@@ -193,6 +218,7 @@ async def read_status(workspace: Workspace) -> WorkspaceStatus:
         conflicted=counts.conflicted,
         insertions=insertions,
         deletions=deletions,
+        own_commits=own_commits,
         head=head,
         subject=subject,
         committed=committed,

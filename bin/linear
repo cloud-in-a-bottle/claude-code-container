@@ -8,6 +8,7 @@ needed here is the app token every terminal already has in its environment.
     linear whoami
     linear issue ENG-123
     linear comment ENG-123 "the PR is up: <url>"
+    linear comment ENG-123 --agent "the PR is up: <url>"   # marked as machine-written
     linear comment ENG-123 -            # body read from stdin
 """
 
@@ -21,6 +22,11 @@ import urllib.request
 
 GRAPHQL_URL = "https://api.linear.app/graphql"
 IDENTIFIER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*-\d+$")
+# Prefixed to --agent comments. Linear only lets an OAuth app in `actor=app` mode choose a
+# display name, and this posts with the owner's personal API key, so the comment carries their
+# name and avatar however it is written. Saying so in the body is the honest substitute: a
+# reader can tell at a glance that a machine wrote it and the owner did not.
+AGENT_HEADER = "\U0001f916 **claude-workbench** \u00b7 automated run"
 TIMEOUT_SECONDS = 30
 
 
@@ -84,6 +90,8 @@ def cmd_comment(args):
     body = sys.stdin.read() if args.body == "-" else args.body
     if not body.strip():
         sys.exit("refusing to post an empty comment")
+    if args.agent:
+        body = f"{AGENT_HEADER}\n\n{body.strip()}"
     mutation = """
     mutation Comment($issueId: String!, $body: String!) {
       commentCreate(input: {issueId: $issueId, body: $body}) { success comment { url } }
@@ -108,6 +116,11 @@ def main():
     comment = sub.add_parser("comment", help="post a comment on an issue")
     comment.add_argument("issue", help="issue identifier (ENG-123) or id")
     comment.add_argument("body", help="comment body, or - to read it from stdin")
+    comment.add_argument(
+        "--agent",
+        action="store_true",
+        help="mark the comment as machine-written (it still posts under the owner's Linear account)",
+    )
     comment.set_defaults(run=cmd_comment)
 
     args = parser.parse_args()

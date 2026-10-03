@@ -88,6 +88,7 @@ A **project** is a git repo you've told the workbench about: a name, a clone URL
 ~/.workbench/projects.json            the project list
 ~/.workbench/mirrors/<project>.git    one bare mirror per project
 ~/workspaces/<project>/<workspace>/   the workspaces themselves
+~/.workbench/archive.json             which workspaces are archived, and the tabs to bring back
 ```
 
 The mirror is what makes a second workspace cheap: the first one pays for a network clone into the mirror, and every workspace after that is a local clone from it (hardlinked objects, so near-instant and nearly free on disk). Each workspace's `origin` is rewritten to the real remote afterwards, so `git push`, `git pull` and anything reading the remote behave exactly as in an ordinary checkout.
@@ -109,6 +110,18 @@ Workspaces always start at the *newest* commit on that branch. Two things make t
 If the remote can't be reached, the bootstrap says so and falls back to the mirror already on disk. You get a workspace either way; it just may be behind.
 
 Deleting a workspace deletes the directory and kills its terminals, and is not recoverable. Removing a project forgets it and deletes its mirror, but refuses while it still has workspaces — those hold your work.
+
+### Archiving one
+
+A workspace you're done with for now, but not done with, can be **archived**: right-click it in the sidebar and choose *Archive*. That closes everything it is running — every terminal, the Claude sessions inside them, its editor — and moves it into an **Archived** section under its project, collapsible and folded out of the way of the work in progress.
+
+Nothing on disk is touched. The directory, the branch, the uncommitted changes and the Claude transcripts are all exactly where they were; archiving is about processes, not about work. An archived workspace also drops out of the sidebar's polls, so it costs no `git status` and no agent-status reads — which, along with the memory its terminals and editor were holding, is most of what you get back for archiving one.
+
+Unarchive by clicking the row (or right-click → *Unarchive*). The terminals come back as they were — the same tabs, with the same names and in the same dock layout — and each Claude tab resumes the conversation it was in rather than starting a fresh one, because a tab pins its `--session-id` and the archive records it. A terminal sitting in a subdirectory that has since been deleted comes back in the workspace root instead of not at all.
+
+Being archived is a workspace attribute, like its billing mode, and not a second source of truth for which workspaces exist — that is still read off disk. Which is also why an archived workspace refuses to open a terminal or an editor (`409`): it would leave the rail saying "archived" over a workspace that was quietly running again.
+
+Archive and unarchive are each two steps that a crash can land between, so both are ordered to fail towards the same harmless state: the workspace listed as live with nothing open in it, which is indistinguishable from one whose tabs you closed by hand, and which opening it recovers from. That is what lets the startup restore stay ignorant of the archive entirely.
 
 ### Billing: API key or Claude subscription
 
@@ -153,7 +166,9 @@ PATCH  /api/projects/{id}   {name?, setup?, default_branch?}
 DELETE /api/projects/{id}
 POST   /api/workspaces      {project_id, name?, ref?, billing?}
 DELETE /api/workspaces/{project}/{workspace}
-GET    /api/workspaces/status                 git status of every workspace, in one call
+POST   /api/workspaces/{project}/{workspace}/archive     close it down and file it away
+POST   /api/workspaces/{project}/{workspace}/unarchive   reopen its terminals, sessions resumed
+GET    /api/workspaces/status                 git status of every live workspace, in one call
 GET    /api/workspaces/agents                 what Claude is doing in each workspace
 GET    /api/settings                          billing default, and what each mode can bill to
 POST   /api/settings        {default_billing}
@@ -213,18 +228,25 @@ The server renders `data-theme` into the page, so there's no flash of the wrong 
 
 ### Side-by-side panel (opt-in)
 
-A resizable pane beside the terminal that loads any URL in an iframe — handy for watching a dev server or another openhost app while you work. It's off by default. The easiest way to turn it on is the bundled skill: run `/side-by-side` in Claude Code and ask for it on or off. Under the hood that's just:
+A resizable pane beside the terminal that loads any URL in an iframe — mainly for watching a dev server running in the container, or another openhost app, while you work. It's off by default. The easiest way to use it is the bundled skill: `/side-by-side` in Claude Code, or just ask Claude to show you what it's running. Under the hood:
 
 ```
-POST /api/ui/settings   { "side_panel": true }
-GET  /api/ui/settings   -> { "side_panel": false }
+POST /api/ui/settings   { "side_panel": true, "side_panel_url": "/absproxy/5173/" }
+GET  /api/ui/settings   -> { "side_panel": true, "theme": "...", "side_panel_url": "/absproxy/5173/" }
 ```
 
-The setting is stored in `$HOME/.workbench/ui.json`. Since openhost points `HOME` at the app's persistent data dir, the choice survives container rebuilds. It takes effect on the next page load; reloading is safe because terminals live server-side and the page re-attaches to the running session.
+Both settings are stored in `$HOME/.workbench/ui.json`, so they survive container rebuilds, and an open page polls them every few seconds — no reload needed. Changing `side_panel_url` from outside shows the panel even if it was hidden; typing in the panel's URL bar saves there too, so the two never fight. Drag the divider to resize, or double-click it to reset; it's focusable, with arrow keys (Shift for larger steps). Width and visibility are per browser, in `localStorage`, and **◻ panel** in the top bar brings a hidden pane back.
 
-Drag the divider to resize, or double-click it to reset; it's focusable, with arrow keys (Shift for larger steps). The pane's toolbar has a URL bar plus reload, open-in-a-real-tab, and hide buttons, and **◻ panel** in the top bar brings a hidden pane back. Width, visibility and last URL are remembered per browser in `localStorage`; the on/off setting above is server-side.
+#### Previewing a dev server
 
-The setting reaches the page as `window.__WORKBENCH__.side_panel`, so the panel is only mounted when it's on. It takes effect on the next page load.
+The iframe loads in *your* browser, so `http://localhost:3000` there means your own machine, not the container — it only ever worked when the workbench itself ran locally. Instead the workbench proxies to ports inside the container, on its own origin and behind the same owner login as everything else (`src/server/preview/`):
+
+- `/proxy/<port>/foo` → `localhost:<port>/foo`. The prefix is stripped, so any server works without configuration, but only its *relative* links survive; an absolute `/app.js` escapes the prefix and 404s against the workbench. Use it for simple servers (`python -m http.server`, a quick script).
+- `/absproxy/<port>/foo` → `localhost:<port>/absproxy/<port>/foo`. The prefix is kept, so the server must be told it lives there — `vite --base /absproxy/5173/`, Next's `basePath`, and so on — and in return absolute links and hot-reload websockets work. Use it for real frontends.
+
+Websockets go through both. Upstream requests are readdressed to `localhost:<port>` (Host, and a same-origin Origin), since dev servers refuse unfamiliar hosts, with the real one in `X-Forwarded-Host`; strip mode adds `X-Forwarded-Prefix`. Redirects back to the server's own address are pointed through the proxy. A page load while nothing is listening yet gets a page that retries every couple of seconds, so the panel can be pointed at a port before the server is up.
+
+Because a preview is same-origin with the workbench, the code it runs can call the workbench's API as you. That's fine for your own dev server — it's code you're already running in a shell here — but don't point it at something you don't trust; open untrusted sites by their real URL instead.
 
 ## The editor (VS Code in a panel)
 

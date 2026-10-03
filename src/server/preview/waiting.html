@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="2">
+<title>waiting for port $port</title>
+<link rel="stylesheet" href="/static/themes.css">
+<style>
+  html, body { margin: 0; background: var(--bg); color: var(--fg); font-size: 13px; line-height: 1.6;
+    font-family: -apple-system, system-ui, sans-serif; }
+  main { padding: 20px 18px; }
+  h1 { font-size: 14px; margin: 0 0 4px; color: var(--bright); font-weight: 600; }
+  p { margin: 0; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Nothing on port $port yet</h1>
+  <p>Retrying every couple of seconds &mdash; this page turns into the server once it is listening.</p>
+</main>
+<script>
+  // A separate document, so it doesn't inherit the workbench's colour scheme on its own.
+  fetch('/api/ui/settings')
+    .then(function (r) { return r.json(); })
+    .then(function (s) { if (s && s.theme) document.documentElement.setAttribute('data-theme', s.theme); })
+    .catch(function () { /* keep the default scheme */ });
+</script>
+</body>
+</html>

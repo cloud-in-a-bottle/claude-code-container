@@ -134,6 +134,7 @@ body { display: flex; flex-direction: row; }
 }
 .tab-menu-item { padding: 8px 14px; cursor: pointer; font-size: 13px; color: var(--fg); white-space: nowrap; }
 .tab-menu-item:hover { background: var(--hover-bg); color: var(--bright); }
+.tab-menu-item.danger, .tab-menu-item.danger:hover { color: var(--danger); }
 .tab-menu-desc { font-size: 11px; color: var(--menu-desc); margin-top: 1px; }
 .tab-menu-sep { height: 1px; background: var(--menu-border); margin: 4px 0; }
 

@@ -13,6 +13,7 @@ import termios
 import uuid
 from collections.abc import Iterator
 from collections.abc import Mapping
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -393,20 +394,21 @@ def _tab_cwd(tab: ServerTab) -> str:
     return cwd
 
 
+def persisted_tab(tab: ServerTab) -> PersistedTab:
+    """One live tab, in the form a restore needs."""
+    return PersistedTab(
+        id=tab.id,
+        label=tab.label,
+        kind=tab.kind,
+        cwd=_tab_cwd(tab),
+        session_id=tab.session_id,
+        workspace_id=tab.workspace_id,
+    )
+
+
 def tab_snapshot() -> list[PersistedTab]:
     """The live tabs, in the form a restore needs. Dead tabs are dropped rather than resurrected."""
-    return [
-        PersistedTab(
-            id=t.id,
-            label=t.label,
-            kind=t.kind,
-            cwd=_tab_cwd(t),
-            session_id=t.session_id,
-            workspace_id=t.workspace_id,
-        )
-        for t in _tabs.values()
-        if t.alive
-    ]
+    return [persisted_tab(t) for t in _tabs.values() if t.alive]
 
 
 def persist_tabs() -> None:
@@ -456,44 +458,55 @@ def restore_command(kind: str, claude_bin: str, session_id: str = "", *, continu
     return ["bash", "-l", "-c", f"{attempt}; exec bash"]
 
 
+async def restore_persisted_tabs(entries: Sequence[PersistedTab]) -> list[ServerTab]:
+    """Bring written-down tabs back as running ones, each in the conversation it left off in.
+
+    Shared by the startup restore and by unarchiving a workspace: both are the same act of turning
+    a saved tab list back into processes, and only differ in where the list came from.
+    """
+    claude_bin = shutil.which("claude") or "claude"
+
+    restored: list[ServerTab] = []
+    for entry in entries:
+        workspace = parse_workspace_id(entry.workspace_id)
+        # A tab is only meaningful inside its workspace, so one whose workspace has been deleted
+        # (or which predates workspaces entirely) is dropped rather than resurrected somewhere
+        # arbitrary.
+        if workspace is None or not workspace.path.is_dir():
+            print(f"[tabs] dropping tab {entry.label!r}: workspace {entry.workspace_id!r} is gone", flush=True)
+            continue
+        # The tab's own cwd can still be gone even when the workspace isn't — a subdirectory it was
+        # sitting in got deleted, say.
+        cwd_ok = Path(entry.cwd).is_dir()
+        restored.append(
+            await create_server_tab(
+                command=restore_command(entry.kind, claude_bin, entry.session_id, continue_ok=cwd_ok),
+                cwd=entry.cwd if cwd_ok else str(workspace.path),
+                env=await workspace_auth_env(entry.workspace_id),
+                label=entry.label,
+                kind=entry.kind,
+                tab_id=entry.id,
+                session_id=entry.session_id,
+                workspace_id=entry.workspace_id,
+            )
+        )
+    return restored
+
+
 async def restore_tabs() -> list[ServerTab]:
     """Recreate the tabs from the last run. Processes don't survive a restart; their tabs do.
 
-    Called once at startup, before any client connects.
+    Called once at startup, before any client connects. An archived workspace's tabs were killed
+    and taken out of the tab list when it was archived, so there is nothing here to exclude.
     """
     global _restoring
     persisted = load_tabs()
     if not persisted:
         return []
 
-    claude_bin = shutil.which("claude") or "claude"
-
-    restored: list[ServerTab] = []
     _restoring = True
     try:
-        for entry in persisted:
-            workspace = parse_workspace_id(entry.workspace_id)
-            # A tab is only meaningful inside its workspace, so one whose workspace has been
-            # deleted (or which predates workspaces entirely) is dropped rather than resurrected
-            # somewhere arbitrary.
-            if workspace is None or not workspace.path.is_dir():
-                print(f"[tabs] dropping tab {entry.label!r}: workspace {entry.workspace_id!r} is gone", flush=True)
-                continue
-            # The tab's own cwd can still be gone even when the workspace isn't — a subdirectory
-            # it was sitting in got deleted, say.
-            cwd_ok = Path(entry.cwd).is_dir()
-            restored.append(
-                await create_server_tab(
-                    command=restore_command(entry.kind, claude_bin, entry.session_id, continue_ok=cwd_ok),
-                    cwd=entry.cwd if cwd_ok else str(workspace.path),
-                    env=await workspace_auth_env(entry.workspace_id),
-                    label=entry.label,
-                    kind=entry.kind,
-                    tab_id=entry.id,
-                    session_id=entry.session_id,
-                    workspace_id=entry.workspace_id,
-                )
-            )
+        restored = await restore_persisted_tabs(persisted)
     finally:
         _restoring = False
     persist_tabs()
@@ -549,6 +562,11 @@ def kill_tab(tab: ServerTab) -> None:
 
 def tabs_for_workspace(workspace_id: str) -> list[ServerTab]:
     return [t for t in _tabs.values() if t.workspace_id == workspace_id]
+
+
+def persisted_tabs_for_workspace(workspace_id: str) -> tuple[PersistedTab, ...]:
+    """What a workspace's live terminals would need to come back as. Read before killing them."""
+    return tuple(persisted_tab(t) for t in tabs_for_workspace(workspace_id) if t.alive)
 
 
 async def new_tab_in_workspace(workspace: Workspace, label: str | None = None) -> ServerTab:
