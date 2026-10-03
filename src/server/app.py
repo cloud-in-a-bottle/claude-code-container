@@ -31,6 +31,8 @@ from server.routes.linear import linear_webhook
 from server.routes.open_workspace import open_workspace
 from server.routes.pages import health
 from server.routes.pages import index
+from server.routes.preview import preview_absproxy
+from server.routes.preview import preview_proxy
 from server.routes.projects import archive_workspace_route
 from server.routes.projects import create_project
 from server.routes.projects import create_workspace
@@ -112,6 +114,8 @@ app = Litestar(
         start_editor,
         stop_editor,
         editor_proxy,
+        preview_proxy,
+        preview_absproxy,
         terminal_ws,
         create_static_files_router(path="/static", directories=[APP_DIR / "static"], cache_control=NO_CACHE),
     ],

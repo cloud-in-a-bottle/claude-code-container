@@ -79,15 +79,19 @@ def test_malformed_file_raises(settings_path: Path) -> None:
 def test_get_settings_reports_default() -> None:
     resp = _client().get("/api/ui/settings")
     assert resp.status_code == 200
-    assert resp.json() == {"side_panel": False, "theme": "solarized-light"}
+    assert resp.json() == {"side_panel": False, "theme": "solarized-light", "side_panel_url": None}
 
 
 def test_post_settings_persists(settings_path: Path) -> None:
     client = _client()
     resp = client.post("/api/ui/settings", json={"side_panel": True})
     assert resp.status_code == 200
-    assert resp.json() == {"side_panel": True, "theme": "solarized-light"}
-    assert client.get("/api/ui/settings").json() == {"side_panel": True, "theme": "solarized-light"}
+    assert resp.json() == {"side_panel": True, "theme": "solarized-light", "side_panel_url": None}
+    assert client.get("/api/ui/settings").json() == {
+        "side_panel": True,
+        "theme": "solarized-light",
+        "side_panel_url": None,
+    }
     assert ui_settings.load_ui_settings() == UiSettings(side_panel=True)
 
 
@@ -143,10 +147,49 @@ def test_updating_one_setting_leaves_the_other_alone() -> None:
     client = _client()
     client.post("/api/ui/settings", json={"side_panel": True})
     client.post("/api/ui/settings", json={"theme": "solarized-light"})
-    assert client.get("/api/ui/settings").json() == {"side_panel": True, "theme": "solarized-light"}
+    assert client.get("/api/ui/settings").json() == {
+        "side_panel": True,
+        "theme": "solarized-light",
+        "side_panel_url": None,
+    }
 
     client.post("/api/ui/settings", json={"side_panel": False})
-    assert client.get("/api/ui/settings").json() == {"side_panel": False, "theme": "solarized-light"}
+    assert client.get("/api/ui/settings").json() == {
+        "side_panel": False,
+        "theme": "solarized-light",
+        "side_panel_url": None,
+    }
+
+
+# ── the panel's URL ────────────────────────────────────────────────────────────
+
+
+def test_panel_url_round_trips_and_clears() -> None:
+    client = _client()
+    resp = client.post("/api/ui/settings", json={"side_panel": True, "side_panel_url": "/absproxy/5173/"})
+    assert resp.json()["side_panel_url"] == "/absproxy/5173/"
+    assert ui_settings.load_ui_settings().side_panel_url == "/absproxy/5173/"
+
+    client.post("/api/ui/settings", json={"theme": "dark"})
+    assert ui_settings.load_ui_settings().side_panel_url == "/absproxy/5173/"
+
+    client.post("/api/ui/settings", json={"side_panel_url": None})
+    assert ui_settings.load_ui_settings().side_panel_url is None
+    assert ui_settings.load_ui_settings().side_panel
+
+
+@pytest.mark.parametrize("url", ["javascript:alert(1)", "//evil.example/", "localhost:3000", 7, ""])
+def test_panel_url_that_is_not_a_path_or_http_is_400(url: object) -> None:
+    client = _client()
+    client.post("/api/ui/settings", json={"side_panel_url": "/proxy/8000/"})
+    assert client.post("/api/ui/settings", json={"side_panel_url": url}).status_code == 400
+    assert ui_settings.load_ui_settings().side_panel_url == "/proxy/8000/"
+
+
+def test_index_carries_the_panel_url() -> None:
+    client = _client()
+    client.post("/api/ui/settings", json={"side_panel_url": "/proxy/8000/"})
+    assert '"side_panel_url": "/proxy/8000/"' in client.get("/").text
 
 
 def test_theme_names_match_the_client() -> None:

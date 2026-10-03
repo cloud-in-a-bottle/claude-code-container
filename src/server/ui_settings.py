@@ -18,6 +18,12 @@ THEMES = ("dark", "solarized-light", "solarized-dark")
 class UiSettings:
     side_panel: bool = False
     theme: str = DEFAULT_THEME
+    # What the side panel shows. Server-side, unlike the panel's width, so that Claude can point it
+    # at a dev server it just started; None until anyone has, and the panel shows its home page.
+    side_panel_url: str | None = None
+
+    def to_json(self) -> dict[str, bool | str | None]:
+        return {"side_panel": self.side_panel, "theme": self.theme, "side_panel_url": self.side_panel_url}
 
 
 def load_ui_settings() -> UiSettings:
@@ -34,7 +40,10 @@ def load_ui_settings() -> UiSettings:
     theme = str(raw.get("theme", DEFAULT_THEME))
     if theme not in THEMES:
         raise ValueError(f"unknown theme {theme!r} in {UI_SETTINGS_PATH}; expected one of {', '.join(THEMES)}")
-    return UiSettings(side_panel=bool(raw.get("side_panel", False)), theme=theme)
+    url = raw.get("side_panel_url")
+    return UiSettings(
+        side_panel=bool(raw.get("side_panel", False)), theme=theme, side_panel_url=None if url is None else str(url)
+    )
 
 
 def save_ui_settings(settings: UiSettings) -> None:
@@ -43,5 +52,5 @@ def save_ui_settings(settings: UiSettings) -> None:
         raise ValueError(f"unknown theme {settings.theme!r}; expected one of {', '.join(THEMES)}")
     UI_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = UI_SETTINGS_PATH.with_name(UI_SETTINGS_PATH.name + ".tmp")
-    tmp_path.write_text(json.dumps({"side_panel": settings.side_panel, "theme": settings.theme}, indent=2) + "\n")
+    tmp_path.write_text(json.dumps(settings.to_json(), indent=2) + "\n")
     tmp_path.replace(UI_SETTINGS_PATH)

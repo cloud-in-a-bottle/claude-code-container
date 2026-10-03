@@ -228,18 +228,25 @@ The server renders `data-theme` into the page, so there's no flash of the wrong 
 
 ### Side-by-side panel (opt-in)
 
-A resizable pane beside the terminal that loads any URL in an iframe — handy for watching a dev server or another openhost app while you work. It's off by default. The easiest way to turn it on is the bundled skill: run `/side-by-side` in Claude Code and ask for it on or off. Under the hood that's just:
+A resizable pane beside the terminal that loads any URL in an iframe — mainly for watching a dev server running in the container, or another openhost app, while you work. It's off by default. The easiest way to use it is the bundled skill: `/side-by-side` in Claude Code, or just ask Claude to show you what it's running. Under the hood:
 
 ```
-POST /api/ui/settings   { "side_panel": true }
-GET  /api/ui/settings   -> { "side_panel": false }
+POST /api/ui/settings   { "side_panel": true, "side_panel_url": "/absproxy/5173/" }
+GET  /api/ui/settings   -> { "side_panel": true, "theme": "...", "side_panel_url": "/absproxy/5173/" }
 ```
 
-The setting is stored in `$HOME/.workbench/ui.json`. Since openhost points `HOME` at the app's persistent data dir, the choice survives container rebuilds. It takes effect on the next page load; reloading is safe because terminals live server-side and the page re-attaches to the running session.
+Both settings are stored in `$HOME/.workbench/ui.json`, so they survive container rebuilds, and an open page polls them every few seconds — no reload needed. Changing `side_panel_url` from outside shows the panel even if it was hidden; typing in the panel's URL bar saves there too, so the two never fight. Drag the divider to resize, or double-click it to reset; it's focusable, with arrow keys (Shift for larger steps). Width and visibility are per browser, in `localStorage`, and **◻ panel** in the top bar brings a hidden pane back.
 
-Drag the divider to resize, or double-click it to reset; it's focusable, with arrow keys (Shift for larger steps). The pane's toolbar has a URL bar plus reload, open-in-a-real-tab, and hide buttons, and **◻ panel** in the top bar brings a hidden pane back. Width, visibility and last URL are remembered per browser in `localStorage`; the on/off setting above is server-side.
+#### Previewing a dev server
 
-The setting reaches the page as `window.__WORKBENCH__.side_panel`, so the panel is only mounted when it's on. It takes effect on the next page load.
+The iframe loads in *your* browser, so `http://localhost:3000` there means your own machine, not the container — it only ever worked when the workbench itself ran locally. Instead the workbench proxies to ports inside the container, on its own origin and behind the same owner login as everything else (`src/server/preview/`):
+
+- `/proxy/<port>/foo` → `localhost:<port>/foo`. The prefix is stripped, so any server works without configuration, but only its *relative* links survive; an absolute `/app.js` escapes the prefix and 404s against the workbench. Use it for simple servers (`python -m http.server`, a quick script).
+- `/absproxy/<port>/foo` → `localhost:<port>/absproxy/<port>/foo`. The prefix is kept, so the server must be told it lives there — `vite --base /absproxy/5173/`, Next's `basePath`, and so on — and in return absolute links and hot-reload websockets work. Use it for real frontends.
+
+Websockets go through both. Upstream requests are readdressed to `localhost:<port>` (Host, and a same-origin Origin), since dev servers refuse unfamiliar hosts, with the real one in `X-Forwarded-Host`; strip mode adds `X-Forwarded-Prefix`. Redirects back to the server's own address are pointed through the proxy. A page load while nothing is listening yet gets a page that retries every couple of seconds, so the panel can be pointed at a port before the server is up.
+
+Because a preview is same-origin with the workbench, the code it runs can call the workbench's API as you. That's fine for your own dev server — it's code you're already running in a shell here — but don't point it at something you don't trust; open untrusted sites by their real URL instead.
 
 ## The editor (VS Code in a panel)
 
