@@ -128,6 +128,14 @@ Workspaces always start at the *newest* commit on that branch. Two things make t
 
 If the remote can't be reached, the bootstrap says so and falls back to the mirror already on disk. You get a workspace either way; it just may be behind.
 
+### Folder projects: no repo, or more than one
+
+A project doesn't have to be a repo. Choose *Folder (no repo)* when adding one and it needs only a name: each of its workspaces starts as an empty directory under `~/workspaces/<project>/`, the setup command (if any) runs in it, and Claude opens there. Use one for something that doesn't have a repo yet — `git init` in the workspace when it's ready — or for work spanning several repos, with a setup command like `git clone <a> && git clone <b>` so each workspace gets its own copy of all of them.
+
+There is no mirror, ref or default branch for a folder project, and the sidebar dot shows a dashed circle ("not a git repo") rather than a git status — until the workspace root becomes a repo itself, at which point it reads like any other workspace. Repos cloned into subdirectories aren't tracked by the dot.
+
+When the work outgrows the folder, give the project its repo: ask Claude in the workspace to put it in one (the bundled `attach-repo` skill does the `git init`, creates the GitHub repo after asking you its name and visibility, pushes, and attaches it), or push it yourself and enter the URL under the project's ⚙. That makes it an ordinary repo project for good — new workspaces are clones of the repo, and the existing ones carry on with normal git status. It is refused until the repo has a commit pushed, and while any of the project's workspaces is still not a git repo with a commit, since under a repo project a directory without one would read as a clone that never finishes.
+
 Deleting a workspace deletes the directory and kills its terminals, and is not recoverable. Removing a project forgets it and deletes its mirror, but refuses while it still has workspaces — those hold your work.
 
 ### Archiving one
@@ -180,8 +188,8 @@ overlay can carry `None` (see `src/server/billing.py` and `create_server_tab`).
 
 ```
 GET    /api/projects                          projects, each with its workspaces
-POST   /api/projects        {repo_url, name?, setup?, default_branch?}
-PATCH  /api/projects/{id}   {name?, setup?, default_branch?}
+POST   /api/projects        {repo_url, name?, setup?, default_branch?}   or {name, setup?} for a folder project
+PATCH  /api/projects/{id}   {name?, setup?, default_branch?, repo_url?}   repo_url only once, on a folder project
 DELETE /api/projects/{id}
 POST   /api/workspaces      {project_id, name?, ref?, billing?}
 DELETE /api/workspaces/{project}/{workspace}

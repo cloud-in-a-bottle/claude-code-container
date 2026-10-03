@@ -58,7 +58,7 @@ async def start_workspace_tab(
     env: dict[str, str | None] = {
         "WS_PATH": str(workspace.path),
         "WS_REPO": project.repo_url,
-        "WS_MIRROR": str(mirror_path(project.id)),
+        "WS_MIRROR": str(mirror_path(project.id)) if project.has_repo else "",
         "WS_REF": ref,
         "WS_BRANCH": branch,
         "WS_SETUP": project.setup,

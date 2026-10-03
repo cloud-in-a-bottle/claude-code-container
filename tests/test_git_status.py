@@ -220,6 +220,24 @@ def test_a_repo_with_no_commits_is_still_being_created(workbench_home: Path) -> 
     assert status.branch == "main"
 
 
+def test_a_folder_workspace_without_a_repo_is_a_folder(workbench_home: Path) -> None:
+    """Nothing is cloning into a folder project's workspace, so it must not pulse forever."""
+    workspace = workspace_at(workbench_home)
+    workspace.path.mkdir()
+
+    status = run(git_status.read_status(workspace, cloned=False))
+    assert status.state == git_status.FOLDER
+
+    git(workspace.path, "init", "-b", "main")
+    assert run(git_status.read_status(workspace, cloned=False)).state == git_status.FOLDER
+
+
+def test_a_folder_workspace_that_became_a_repo_reports_git(workbench_home: Path) -> None:
+    workspace = workspace_at(workbench_home)
+    make_repo(workspace.path)
+    assert run(git_status.read_status(workspace, cloned=False)).state == git_status.CLEAN
+
+
 def test_a_broken_repo_reports_what_git_said(workbench_home: Path) -> None:
     workspace = workspace_at(workbench_home)
     workspace.path.mkdir()
@@ -254,7 +272,7 @@ def test_a_second_read_comes_from_the_cache(workbench_home: Path, monkeypatch: p
 
     reads = 0
 
-    async def counted(ws: Workspace) -> git_status.WorkspaceStatus:
+    async def counted(ws: Workspace, cloned: bool = True) -> git_status.WorkspaceStatus:
         nonlocal reads
         reads += 1
         return git_status.WorkspaceStatus(workspace_id=ws.id, state=git_status.CLEAN)
@@ -298,3 +316,11 @@ def test_status_route_covers_every_workspace_of_every_project(workbench_home: Pa
 
 def test_status_route_with_no_projects_returns_nothing(workbench_home: Path) -> None:
     assert _client().get("/api/workspaces/status").json() == []
+
+
+def test_status_route_knows_folder_projects_are_not_cloning(workbench_home: Path) -> None:
+    store.add_project("scratch", "")
+    workspace_at(workbench_home, project="scratch", name="w").path.mkdir()
+
+    body = _client().get("/api/workspaces/status").json()
+    assert [(entry["workspace_id"], entry["dot"]) for entry in body] == [("scratch/w", git_status.FOLDER)]

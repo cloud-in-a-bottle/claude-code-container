@@ -37,6 +37,8 @@ export function headline(view) {
       return 'still being created';
     case 'unavailable':
       return 'git status unavailable';
+    case 'folder':
+      return 'not a git repo';
     default:
       return view.dot;
   }

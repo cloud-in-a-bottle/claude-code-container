@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
@@ -570,3 +571,157 @@ def test_deleting_a_workspace_forgets_how_it_was_billed(workbench_home: Path, mo
 
     assert _client().delete("/api/workspaces/r/ws").status_code == 200
     assert billing.load_billing().workspaces == {}
+
+
+# ── folder projects ────────────────────────────────────────────────────────────
+
+
+def test_a_project_without_a_repo_is_a_folder_project(workbench_home: Path) -> None:
+    resp = _client().post("/api/projects", json={"name": "Scratch", "setup": "echo hi"})
+    assert resp.status_code == 200
+    assert resp.json()["repo_url"] == ""
+
+    project = store.find_project("scratch")
+    assert project is not None and not project.has_repo
+    assert project.setup == "echo hi"
+    # Every folder project has the same empty repo URL, so none of them answers for a repo.
+    assert store.find_project_by_repo("") is None
+
+
+def test_a_folder_project_needs_a_name(workbench_home: Path) -> None:
+    assert _client().post("/api/projects", json={}).status_code == 400
+    assert store.load_projects() == ()
+
+
+def test_a_folder_project_has_no_default_branch(workbench_home: Path) -> None:
+    client = _client()
+    assert client.post("/api/projects", json={"name": "s", "default_branch": "main"}).status_code == 400
+    store.add_project("s", "")
+    assert client.patch("/api/projects/s", json={"default_branch": "main"}).status_code == 400
+
+
+def test_a_folder_workspace_skips_the_remote_entirely(workbench_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    probed = _stub_access(monkeypatch)
+    created = _stub_tabs(monkeypatch)
+    store.add_project("s", "", setup="just setup")
+
+    resp = _client().post("/api/workspaces", json={"project_id": "s"})
+    assert resp.status_code == 200
+    assert resp.json()["id"] == "s/workspace"
+    assert (workbench_home / "workspaces" / "s" / "workspace").is_dir()
+
+    assert probed == []
+    env = created[0]["env"]
+    assert env["WS_REPO"] == ""
+    assert env["WS_MIRROR"] == ""
+    assert env["WS_SETUP"] == "just setup"
+    assert created[0]["kind"] == "claude"
+
+
+def test_a_folder_workspace_refuses_a_ref(workbench_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_tabs(monkeypatch)
+    store.add_project("s", "")
+    resp = _client().post("/api/workspaces", json={"project_id": "s", "name": "w", "ref": "main"})
+    assert resp.status_code == 400
+    assert not (workbench_home / "workspaces" / "s" / "w").exists()
+
+
+# ── attaching a repo to a folder project ───────────────────────────────────────
+
+
+def _folder_with_repo_workspace(workbench_home: Path) -> Path:
+    """A folder project `s` whose one workspace is a repo with a commit, as the attach skill leaves it."""
+    store.add_project("s", "")
+    path = workbench_home / "workspaces" / "s" / "idea"
+    path.mkdir(parents=True)
+    for args in (("init", "-q", "-b", "main"), ("commit", "-q", "--allow-empty", "-m", "first")):
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args], cwd=path, check=True)
+    return path
+
+
+def test_a_folder_project_becomes_a_repo_project(workbench_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    probed = _stub_access(monkeypatch)
+    _folder_with_repo_workspace(workbench_home)
+
+    resp = _client().patch("/api/projects/s", json={"repo_url": "https://github.com/o/idea.git"})
+    assert resp.status_code == 200
+    assert resp.json()["repo_url"] == "https://github.com/o/idea.git"
+    assert [w["id"] for w in resp.json()["workspaces"]] == ["s/idea"]
+    assert probed == [("https://github.com/o/idea.git", "HEAD")]
+
+    project = store.find_project("s")
+    assert project is not None and project.has_repo
+    assert store.find_project_by_repo("https://github.com/o/idea.git") == project
+
+
+def test_attaching_can_set_the_default_branch_in_the_same_call(
+    workbench_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    probed = _stub_access(monkeypatch)
+    _folder_with_repo_workspace(workbench_home)
+
+    body = {"repo_url": "https://github.com/o/idea.git", "default_branch": "dev"}
+    assert _client().patch("/api/projects/s", json=body).status_code == 200
+    assert probed == [("https://github.com/o/idea.git", "dev")]
+
+
+def test_a_repo_project_keeps_its_repo(workbench_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    probed = _stub_access(monkeypatch)
+    store.add_project("r", "https://github.com/o/r.git")
+
+    resp = _client().patch("/api/projects/r", json={"repo_url": "https://github.com/o/other.git"})
+    assert resp.status_code == 400
+    assert probed == []
+    project = store.find_project("r")
+    assert project is not None and project.repo_url == "https://github.com/o/r.git"
+
+
+def test_attaching_refuses_while_a_workspace_is_not_a_repo(
+    workbench_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Under a repo project, a directory with no .git reads as a clone in progress, forever."""
+    probed = _stub_access(monkeypatch)
+    _folder_with_repo_workspace(workbench_home)
+    (workbench_home / "workspaces" / "s" / "notes").mkdir()
+
+    resp = _client().patch("/api/projects/s", json={"repo_url": "https://github.com/o/idea.git"})
+    assert resp.status_code == 409
+    assert "notes" in resp.json()["message"]
+    assert probed == []
+
+    # `git init` alone isn't enough: with no commit it still reads as a clone in progress.
+    subprocess.run(["git", "init", "-q"], cwd=workbench_home / "workspaces" / "s" / "notes", check=True)
+    resp = _client().patch("/api/projects/s", json={"repo_url": "https://github.com/o/idea.git"})
+    assert resp.status_code == 409
+    assert "notes" in resp.json()["message"]
+    project = store.find_project("s")
+    assert project is not None and not project.has_repo
+
+
+def test_attaching_refuses_a_repo_another_project_has(workbench_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_access(monkeypatch)
+    store.add_project("r", "https://github.com/o/idea.git")
+    _folder_with_repo_workspace(workbench_home)
+
+    resp = _client().patch("/api/projects/s", json={"repo_url": "https://github.com/o/idea.git"})
+    assert resp.status_code == 409
+    assert resp.json()["error"] == "already_a_project"
+
+
+def test_attaching_an_empty_or_missing_repo_says_to_push_first(
+    workbench_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_access(monkeypatch, decision="not_found")
+    _folder_with_repo_workspace(workbench_home)
+
+    resp = _client().patch("/api/projects/s", json={"repo_url": "https://github.com/o/idea.git"})
+    assert resp.status_code == 404
+    assert "pushed" in resp.json()["message"]
+    project = store.find_project("s")
+    assert project is not None and not project.has_repo
+
+
+def test_attaching_rejects_a_bad_url(workbench_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_access(monkeypatch)
+    _folder_with_repo_workspace(workbench_home)
+    assert _client().patch("/api/projects/s", json={"repo_url": "not a url"}).status_code == 400
