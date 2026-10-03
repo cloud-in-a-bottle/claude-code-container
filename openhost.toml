@@ -6,6 +6,11 @@ description = "Tabbed terminals preloaded with Claude Code and a cloned openhost
 [runtime.container]
 image = "Dockerfile"
 port = 5000
+# For the podman nested in here: pasta gives a container its own network (and `-p`) by creating a
+# tap device in the container's namespace, which needs /dev/net/tun -- and a device node can't be
+# made from inside a user namespace, so it has to be passed in. nested-podman.sh still forces
+# --network=host until a private network is verified to work in a real deploy.
+devices = ["/dev/net/tun"]
 
 [routing]
 health_check = "/health"
