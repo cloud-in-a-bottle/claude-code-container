@@ -28,10 +28,17 @@
   <h1>Side panel</h1>
   <p>Type any URL in the bar above and press <kbd>Enter</kbd> to load it here.</p>
 
-  <h2>Handy while developing</h2>
+  <h2>A server running in this container</h2>
   <ul>
-    <li><code>http://localhost:3000</code> <span class="hint">&mdash; a dev server in a terminal tab</span></li>
-    <li><code>/health</code> <span class="hint">&mdash; this workbench's health route</span></li>
+    <li><code>/absproxy/5173/</code> <span class="hint">&mdash; port 5173, for a server started with that base path
+      (<code>vite --base /absproxy/5173/</code>)</span></li>
+    <li><code>/proxy/8000/</code> <span class="hint">&mdash; port 8000, prefix stripped, for simple servers with
+      relative links</span></li>
+    <li class="hint"><code>localhost</code> here means your own machine, not the container.</li>
+  </ul>
+
+  <h2>Elsewhere</h2>
+  <ul>
     <li><code>https://&lt;app&gt;.&lt;your-zone&gt;/</code> <span class="hint">&mdash; another openhost app</span></li>
   </ul>
 
@@ -44,8 +51,8 @@
   </ul>
 
   <p class="hint" style="margin-top:22px">
-    Width, visibility and the last URL are remembered in this browser.
-    Turn the whole panel off again with <code>/side-by-side</code> in Claude Code.
+    Width and visibility are remembered in this browser. Claude can point this panel at a server it
+    starts &mdash; just ask it to show you. Turn the whole panel off with <code>/side-by-side</code>.
   </p>
 </main>
 <script>

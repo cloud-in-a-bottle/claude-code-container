@@ -66,6 +66,7 @@ export async function uploadPastedImage(blob) {
   return result(resp, 'POST', url);
 }
 
+export const getUiSettings = () => request('GET', '/api/ui/settings');
 export const saveUiSettings = (patch) => request('POST', '/api/ui/settings', patch);
 
 /** Workbench settings: which billing mode new workspaces get, and whether each one has

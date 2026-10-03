@@ -4,12 +4,13 @@ import { Sidebar } from './components/Sidebar';
 import { SidePanel } from './components/SidePanel';
 import { TerminalLayout } from './components/TerminalLayout';
 import { TopBar } from './components/TopBar';
-import { sidePanelEnabled } from './sidePanel';
+import { enabled as sidePanelEnabled, watchPanelSettings } from './sidePanel';
 import { init, sidebarHidden } from './store';
 
 export function App() {
   onMount(() => {
     init().catch((err) => console.error('could not load the workbench', err));
+    watchPanelSettings();
   });
 
   createEffect(() => document.body.classList.toggle('sidebar-hidden', sidebarHidden()));
@@ -23,7 +24,7 @@ export function App() {
           <div id="sp-left">
             <TerminalLayout />
           </div>
-          <Show when={sidePanelEnabled}>
+          <Show when={sidePanelEnabled()}>
             <SidePanel />
           </Show>
         </div>

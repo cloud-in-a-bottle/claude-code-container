@@ -1,7 +1,7 @@
 import { Show, createSignal } from 'solid-js';
 
 import * as api from '../api';
-import { hidden as panelHidden, setHidden as setPanelHidden, sidePanelEnabled } from '../sidePanel';
+import { hidden as panelHidden, setHidden as setPanelHidden, enabled as sidePanelEnabled } from '../sidePanel';
 import { activeWorkspace, adoptTab, newTab, requestEditor, sidebarHidden, state, toggleSidebar } from '../store';
 import { Menu } from './Menu';
 import { ThemePicker } from './ThemePicker';
@@ -55,7 +55,7 @@ export function TopBar() {
         </button>
       </Show>
       <div id="topbar-actions">
-        <Show when={sidePanelEnabled && panelHidden()}>
+        <Show when={sidePanelEnabled() && panelHidden()}>
           <button class="bar-btn" type="button" title="Show the side panel" onClick={() => setPanelHidden(false)}>
             &#9723; panel
           </button>

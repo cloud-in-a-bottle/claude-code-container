@@ -21,6 +21,6 @@ def index() -> Template:
         template_name="index.html",
         context={
             "theme": settings.theme,
-            "bootstrap": {"theme": settings.theme, "side_panel": settings.side_panel},
+            "bootstrap": settings.to_json(),
         },
     )
