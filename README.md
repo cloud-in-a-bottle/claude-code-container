@@ -94,19 +94,23 @@ on seeing overlayfs underneath it, to the `vfs` driver — which copies every la
 stacking them, so it works but is slow and hungry. It says so in the log when it does.
 `PODMAN_GRAPHROOT` overrides the choice; anything that isn't overlayfs will do.
 
-`podman system prune -a` when it gets big. If a graph root ever needs deleting by hand, do it from
-inside the namespace (`workbench-ns podman system reset`) — layer directories are owned by mapped
-subuids, which are only ordinary files from in there.
+`podman system prune -a` when it gets big. If a graph root ever needs deleting by hand, use
+`podman system reset` from a terminal rather than `rm -rf` from somewhere else — layer directories
+are owned by mapped subuids, which are only ordinary files from inside the namespace.
 
 ### Arriving from outside
 
-A `podman exec` into this container from the host lands in pid 1's namespaces, which are the ones
-openhost gave us — podman does not work there. `workbench-ns` hops into the namespace the terminals
-are in:
+Worth knowing if you ever debug this from the host: a `podman exec` into the container lands in pid
+1's namespaces, which are the ones openhost gave us, and podman does not work there. The namespace
+the terminals are in belongs to pid 2 — the server — so get there with `nsenter`:
 
 ```
-podman exec -it openhost-claude-workbench workbench-ns podman ps
+podman exec -it openhost-claude-workbench \
+    nsenter -t 2 -U -m -C --preserve-credentials podman ps
 ```
+
+`--preserve-credentials` matters: without it nsenter drops to the target's uid before joining, and
+uid 0 outside the namespace is the only identity the join is permitted to.
 
 ## GitHub auth (`gh`, pushing, private repos)
 

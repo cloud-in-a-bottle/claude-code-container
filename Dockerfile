@@ -65,13 +65,9 @@ COPY services/ ./services/
 COPY skills/ ./skills/
 COPY claude-home/ ./claude-home/
 # `linear` goes on PATH for every terminal: a Claude working a Linear issue posts back to the issue
-# with it, and it needs no credentials of its own because latchkey injects them. `workbench-ns` is
-# for the other direction — something that arrived by `podman exec` from the host and wants the
-# namespace the terminals are in.
+# with it, and it needs no credentials of its own because latchkey injects them.
 COPY bin/ ./bin/
-RUN chmod +x /app/entrypoint.sh /app/nested-podman.sh \
-    && install -m 0755 /app/bin/linear /usr/local/bin/linear \
-    && install -m 0755 /app/bin/workbench-ns /usr/local/bin/workbench-ns
+RUN chmod +x /app/entrypoint.sh /app/nested-podman.sh && install -m 0755 /app/bin/linear /usr/local/bin/linear
 
 # The app. `uv sync` installs the project editable, so it points at /app/src rather than copying
 # it, and the server serves its templates and static files from there.

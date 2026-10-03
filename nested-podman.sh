@@ -146,17 +146,10 @@ mount_writable_cgroups() {
 if [ "${1:-}" = "--inside" ]; then
     shift
     mount_writable_cgroups || log "warning: no writable cgroup tree; podman will not be able to start containers"
-    # How workbench-ns finds the namespace. Written from in here so it names a process that is
-    # actually inside it, and after the mounts so it is never seen half-set-up.
-    echo $$ > /run/workbench-namespace.pid
     exec "$@"
 fi
 
 write_configs || log "warning: could not write /etc/containers config"
-
-# /run survives a container restart, so a pid file left by the last boot would send workbench-ns
-# into whatever process happens to hold that number now.
-rm -f /run/workbench-namespace.pid
 
 # Mirror our own id maps into the child namespace, so that every id we hold keeps the number it
 # already has: uid 0 stays uid 0 (the workbench's files stay ours) and the subordinate range the
