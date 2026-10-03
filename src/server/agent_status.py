@@ -1,4 +1,5 @@
 import json
+import os
 import time
 from pathlib import Path
 
@@ -27,6 +28,22 @@ STALE_AFTER_SECONDS = 30 * 60
 # When the file itself is swept up. Long enough to survive a workbench restart with the sidebar
 # intact; short enough that the directory is never more than a day's sessions.
 KEEP_FOR_SECONDS = 24 * 60 * 60
+# How long "working" is believed with nothing behind it. A turn reports when it starts and when it
+# ends, and nothing fires in between -- nor when you interrupt one, which is the case this exists
+# for. Claude Code appends to the transcript at every tool call, so a turn that is really running
+# keeps proving it; past this, one that isn't settles back to idle instead of pulsing forever.
+# Long enough to cover a single slow tool call, short enough that an interrupted turn lets go.
+WORKING_GRACE_SECONDS = 120.0
+
+# What Claude Code writes into a session's transcript when a turn is interrupted. Nothing fires a
+# hook for that -- confirmed against 2.1.288, where escape leaves the session reporting "working"
+# indefinitely -- so this marker is the one prompt signal there is. Like everything else that reads
+# a transcript (see server.claude_sessions), it is an unpublished format: not finding it reads as
+# "no", which leaves the grace window above to catch the interrupt a few seconds later instead.
+INTERRUPTED_MARKER = "[Request interrupted by user]"
+# How much of the end of a transcript to read looking for it. Entries run to a few KB, and a
+# conversation of any age runs to megabytes, so only the tail is ever touched.
+TRANSCRIPT_TAIL_BYTES = 16 * 1024
 
 
 @attr.s(auto_attribs=True, frozen=True)
@@ -38,6 +55,9 @@ class AgentReport:
     cwd: str
     at: float
     message: str = ""
+    # The session's transcript, as the hook was told it. Empty for reports written before this was
+    # recorded, which simply means the report has to stand on its own age.
+    transcript: str = ""
 
 
 @attr.s(auto_attribs=True, frozen=True)
@@ -99,6 +119,84 @@ def read_reports() -> tuple[AgentReport, ...]:
     return tuple(sorted(reports, key=lambda r: r.at, reverse=True))
 
 
+def entry_text(entry: dict[str, object]) -> str | None:
+    """The words in one transcript entry, or None if it isn't the kind that has any.
+
+    A transcript carries plenty of bookkeeping between the messages -- modes, titles, file
+    snapshots -- and those say nothing about whether a turn is still running.
+    """
+    message = entry.get("message")
+    if not isinstance(message, dict):
+        return None
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(str(part.get("text", "")) for part in content if isinstance(part, dict))
+    return None
+
+
+def turn_was_interrupted(transcript: str) -> bool:
+    """Whether the last thing said in this session was someone pressing escape.
+
+    Read from the end of the file, newest entry first: the first entry that carries any words
+    decides. Anything unexpected -- no file, a partial line, a format that has moved on -- reads as
+    "no", because the cost of a wrong "yes" is a dot that lies about a working agent.
+    """
+    if not transcript:
+        return False
+    try:
+        with open(transcript, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            handle.seek(max(0, handle.tell() - TRANSCRIPT_TAIL_BYTES))
+            tail = handle.read().decode("utf-8", errors="replace")
+    except OSError:
+        return False
+
+    for line in reversed(tail.splitlines()):
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue  # the first line of the tail is usually half an entry; a last one can be too
+        if not isinstance(entry, dict):
+            continue
+        text = entry_text(entry)
+        if text is not None:
+            return INTERRUPTED_MARKER in text
+    return False
+
+
+def last_sign_of_life(report: AgentReport) -> float:
+    """The most recent moment this session is known to have done anything."""
+    if not report.transcript:
+        return report.at
+    try:
+        return max(report.at, Path(report.transcript).stat().st_mtime)
+    except OSError:
+        return report.at
+
+
+def settled(report: AgentReport, now: float) -> AgentReport:
+    """Read a `working` report with nothing behind it any more as what it really is.
+
+    The hooks say when a turn starts and when it ends. Nothing fires when one is *interrupted*, so
+    the sidebar would otherwise pulse away at a session that stopped working the moment someone
+    pressed escape -- and, because the workbench still has that session's tab, forever.
+
+    Two ways out, in order of how fast they notice: the interrupt Claude Code records in the
+    transcript, and failing that, a working report that nothing has backed up for a while.
+    """
+    if report.state != WORKING:
+        return report
+    # The interrupt itself, which lands in the transcript the moment escape is pressed and so
+    # clears the dot on the next poll rather than at the end of the grace window.
+    if turn_was_interrupted(report.transcript):
+        return attr.evolve(report, state=IDLE)
+    if now - last_sign_of_life(report) < WORKING_GRACE_SECONDS:
+        return report
+    return attr.evolve(report, state=IDLE)
+
+
 def is_current(report: AgentReport, live_sessions: frozenset[str], now: float) -> bool:
     """Whether a report still describes something real.
 
@@ -132,6 +230,7 @@ def statuses_for(
     for report in read_reports():
         if not is_current(report, live_sessions, now):
             continue
+        report = settled(report, now)
         workspace = workspace_for(report.cwd, workspaces)
         if workspace is not None:
             by_workspace.setdefault(workspace.id, []).append(report)
