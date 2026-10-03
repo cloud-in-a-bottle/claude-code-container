@@ -388,3 +388,78 @@ def test_an_interrupted_session_stops_showing_as_working(workbench_home: Path) -
     # Its tab is still running, which is exactly what used to make this permanent.
     statuses = agent_status.statuses_for((workspace,), frozenset({SESSION}))
     assert [s.state for s in statuses] == [agent_status.IDLE]
+
+
+# ── noticing the interrupt itself ──────────────────────────────────────────────
+
+
+def transcript(path: Path, *entries: object) -> str:
+    """A transcript file in Claude Code's shape: one JSON entry per line."""
+    path.write_text("".join(json.dumps(e) + "\n" for e in entries))
+    return str(path)
+
+
+def said(role: str, text: str) -> dict[str, object]:
+    return {"type": role, "message": {"role": role, "content": [{"type": "text", "text": text}]}}
+
+
+INTERRUPTED = said("user", agent_status.INTERRUPTED_MARKER)
+
+
+def test_an_interrupted_turn_is_noticed_at_once(workbench_home: Path) -> None:
+    """The whole point: escape leaves this behind, and nothing else tells the workbench."""
+    path = transcript(workbench_home / "t.jsonl", said("user", "do a thing"), said("assistant", "sure"), INTERRUPTED)
+    assert agent_status.turn_was_interrupted(path)
+
+    now = time.time()
+    assert agent_status.settled(working(now, path), now).state == agent_status.IDLE
+
+
+def test_bookkeeping_after_the_interrupt_does_not_hide_it(workbench_home: Path) -> None:
+    """Transcripts carry modes, titles and file snapshots between the messages; none of them speak."""
+    path = transcript(
+        workbench_home / "t.jsonl",
+        said("assistant", "working on it"),
+        INTERRUPTED,
+        {"type": "permission-mode", "mode": "bypassPermissions"},
+        {"type": "file-history-snapshot", "files": []},
+    )
+    assert agent_status.turn_was_interrupted(path)
+
+
+def test_a_turn_that_carried_on_is_not_interrupted(workbench_home: Path) -> None:
+    """An older interrupt is history once the session has said something since."""
+    path = transcript(workbench_home / "t.jsonl", INTERRUPTED, said("user", "try again"), said("assistant", "ok"))
+    assert not agent_status.turn_was_interrupted(path)
+
+    now = time.time()
+    assert agent_status.settled(working(now, path), now).state == "working"
+
+
+def test_only_the_tail_of_a_long_transcript_is_read(workbench_home: Path) -> None:
+    """Conversations reach megabytes; this runs on every poll."""
+    path = workbench_home / "long.jsonl"
+    filler = [said("assistant", "x" * 2000) for _ in range(200)]
+    transcript(path, *filler, INTERRUPTED)
+    assert path.stat().st_size > agent_status.TRANSCRIPT_TAIL_BYTES * 4
+    assert agent_status.turn_was_interrupted(str(path))
+
+
+def test_an_interrupt_further_back_than_the_tail_is_left_to_the_grace_window(workbench_home: Path) -> None:
+    """Reading only the tail can miss one; the window still catches it, just later."""
+    path = workbench_home / "long.jsonl"
+    transcript(path, INTERRUPTED, *[said("assistant", "x" * 2000) for _ in range(200)])
+    assert not agent_status.turn_was_interrupted(str(path))
+
+
+@pytest.mark.parametrize("body", ["", "not json\n", '{"no": "message"}\n', "{ half a li"])
+def test_a_transcript_it_cannot_read_never_claims_an_interrupt(workbench_home: Path, body: str) -> None:
+    """A wrong "yes" would call a working agent idle, so anything unexpected reads as "no"."""
+    path = workbench_home / "odd.jsonl"
+    path.write_text(body)
+    assert not agent_status.turn_was_interrupted(str(path))
+
+
+def test_a_missing_transcript_never_claims_an_interrupt(workbench_home: Path) -> None:
+    assert not agent_status.turn_was_interrupted(str(workbench_home / "gone.jsonl"))
+    assert not agent_status.turn_was_interrupted("")
