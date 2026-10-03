@@ -15,12 +15,18 @@ PROJECT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 class Project:
     id: str
     name: str
+    # Empty for a folder project: one whose workspaces start as empty directories rather than as
+    # clones, for work that has no repo yet or that spans several.
     repo_url: str
     # Optional command run once in a new workspace before Claude starts, e.g. `just setup`.
     setup: str = ""
     # Branch new workspaces start from. Empty means "whatever the repo's own default branch is",
     # resolved from the remote at creation time rather than remembered here.
     default_branch: str = ""
+
+    @property
+    def has_repo(self) -> bool:
+        return bool(self.repo_url)
 
 
 def slugify(name: str) -> str:
@@ -68,7 +74,7 @@ def load_projects() -> tuple[Project, ...]:
             Project(
                 id=project_id,
                 name=str(entry.get("name", project_id)),
-                repo_url=str(entry["repo_url"]),
+                repo_url=str(entry.get("repo_url", "")),
                 setup=str(entry.get("setup", "")),
                 default_branch=default_branch,
             )
@@ -99,6 +105,9 @@ def find_project(project_id: str) -> Project | None:
 
 
 def find_project_by_repo(repo_url: str) -> Project | None:
+    # Folder projects all share the empty repo URL, and none of them is the project for a repo.
+    if not repo_url:
+        return None
     return next((p for p in load_projects() if p.repo_url == repo_url), None)
 
 

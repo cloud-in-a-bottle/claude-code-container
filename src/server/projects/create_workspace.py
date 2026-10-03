@@ -5,8 +5,9 @@ Run as a child of the tab's login shell, which launches Claude afterwards -- see
 so nothing here is interpolated into a shell.
 
     WS_PATH          absolute path of the workspace dir (already created, empty)
-    WS_REPO          clone URL, kept token-free: this is what origin ends up pointing at
-    WS_MIRROR        absolute path of the project's bare mirror
+    WS_REPO          clone URL, kept token-free: this is what origin ends up pointing at. Empty for a
+                     folder project, which skips the mirror and the clone and only runs the setup
+    WS_MIRROR        absolute path of the project's bare mirror (empty for a folder project)
     WS_REF           branch/tag/sha to check out. The server normally fills this in with the
                      project's configured default branch, or the branch the remote's HEAD points
                      at right now; blank falls back to whatever the mirror's HEAD says.
@@ -142,17 +143,14 @@ def run_setup(path: Path, setup: str) -> None:
         warn("setup command failed; continuing anyway.")
 
 
-def main() -> int:
-    path = Path(os.environ["WS_PATH"])
-    repo_url = os.environ["WS_REPO"]
+def build_checkout(path: Path, repo_url: str) -> bool:
+    """Mirror, clone, check out and branch. False only when there is no clone to work in."""
     mirror = Path(os.environ["WS_MIRROR"])
     token = os.environ.get("WS_GITHUB_TOKEN", "")
-
-    print(flush=True)
     if not update_mirror(mirror, repo_url, token):
-        return FATAL
+        return False
     if not clone_workspace(mirror, path, repo_url):
-        return FATAL
+        return False
 
     ref = os.environ.get("WS_REF", "")
     if ref:
@@ -161,6 +159,19 @@ def main() -> int:
     branch = os.environ.get("WS_BRANCH", "")
     if branch:
         switch_to_branch(path, branch)
+    return True
+
+
+def main() -> int:
+    path = Path(os.environ["WS_PATH"])
+    repo_url = os.environ["WS_REPO"]
+
+    print(flush=True)
+    if repo_url:
+        if not build_checkout(path, repo_url):
+            return FATAL
+    else:
+        log(f"created empty workspace at {path} (this project has no repo)")
 
     setup = os.environ.get("WS_SETUP", "")
     if setup:

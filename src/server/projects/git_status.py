@@ -16,6 +16,9 @@ DIRTY = "dirty"
 CONFLICTED = "conflicted"
 CLONING = "cloning"
 UNAVAILABLE = "unavailable"
+# A folder project's workspace that isn't a repo, or isn't one with commits yet. Nothing is coming
+# to fill it, so unlike CLONING this is where it stays until someone runs `git init` in it.
+FOLDER = "folder"
 
 # These run against repos Claude is working in right now, so every call has to be read-only and
 # unattended: GIT_OPTIONAL_LOCKS keeps a status poll from taking the index lock out from under a
@@ -167,13 +170,20 @@ def first_line(text: str) -> str:
     return text.strip().splitlines()[0].strip() if text.strip() else ""
 
 
-async def read_status(workspace: Workspace) -> WorkspaceStatus:
+async def read_status(workspace: Workspace, cloned: bool = True) -> WorkspaceStatus:
     """Ask git what state one workspace is in. Never raises for a repo it can't read — an
-    unreadable workspace is a status too, and one the sidebar has to be able to show."""
+    unreadable workspace is a status too, and one the sidebar has to be able to show.
+
+    `cloned` is false for a folder project's workspace, which nothing is going to clone into: a
+    missing or empty repo there is the steady state, not one still arriving.
+    """
+    pending = CLONING if cloned else FOLDER
     if not (workspace.path / ".git").exists():
         # The workspace directory is made before the clone that fills it, and the clone runs in a
         # terminal the user is watching, so a workspace without a repo is normally still arriving.
-        return WorkspaceStatus(workspace_id=workspace.id, state=CLONING, detail="not a git repository yet")
+        # A folder's headline already says it isn't a repo, so it gets no detail to repeat that in.
+        detail = "not a git repository yet" if cloned else ""
+        return WorkspaceStatus(workspace_id=workspace.id, state=pending, detail=detail)
 
     rc, porcelain, err = await run_git(workspace.path, "status", "--porcelain=v2", "--branch")
     if rc != 0:
@@ -184,7 +194,7 @@ async def read_status(workspace: Workspace) -> WorkspaceStatus:
     if rc != 0:
         # No commits to describe. `git clone` creates .git first and checks out last, so this is
         # the same story as the missing .git above: the workspace is still being built.
-        return WorkspaceStatus(workspace_id=workspace.id, state=CLONING, branch=counts.branch, detail="no commits yet")
+        return WorkspaceStatus(workspace_id=workspace.id, state=pending, branch=counts.branch, detail="no commits yet")
     head, committed, subject = log.rstrip("\n").split(_LOG_SEPARATOR, 2)
 
     # Staged and unstaged together, which is what "how far is this workspace from its last commit"
@@ -225,8 +235,13 @@ async def read_status(workspace: Workspace) -> WorkspaceStatus:
     )
 
 
-async def read_statuses(workspaces: tuple[Workspace, ...]) -> tuple[WorkspaceStatus, ...]:
-    """Statuses for a whole sidebar's worth of workspaces, a few `git` processes at a time."""
+async def read_statuses(
+    workspaces: tuple[Workspace, ...], folders: frozenset[str] = frozenset()
+) -> tuple[WorkspaceStatus, ...]:
+    """Statuses for a whole sidebar's worth of workspaces, a few `git` processes at a time.
+
+    `folders` holds the ids of the ones belonging to folder projects -- see `read_status`.
+    """
     semaphore = asyncio.Semaphore(_MAX_CONCURRENT)
     started = time.monotonic()
 
@@ -235,7 +250,7 @@ async def read_statuses(workspaces: tuple[Workspace, ...]) -> tuple[WorkspaceSta
         if cached is not None and started - cached[0] < _CACHE_TTL_SECONDS:
             return cached[1]
         async with semaphore:
-            status = await read_status(workspace)
+            status = await read_status(workspace, cloned=workspace.id not in folders)
         _cache[workspace.id] = (time.monotonic(), status)
         return status
 

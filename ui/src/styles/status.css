@@ -33,6 +33,8 @@
 .status-dot.state-pr_closed,
 .status-dot.state-conflicted { background: #f85149; }
 .status-dot.state-unavailable { background: none; border: 1px solid #f85149; }
+/* A folder project's workspace with no repo in it: git has nothing to say, which isn't a fault. */
+.status-dot.state-folder { background: none; border: 1px dashed var(--faint); }
 .status-dot.state-cloning {
   background: none;
   border: 1px solid var(--accent);

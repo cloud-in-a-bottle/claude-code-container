@@ -30,7 +30,8 @@ function loadCollapsed() {
   }
 }
 
-/** The projects → workspaces rail. A project is a git repo; a workspace is one copy of it. */
+/** The projects → workspaces rail. A project is a git repo, or a folder project with none; a
+ *  workspace is one copy of it. */
 export function Sidebar() {
   const [dialog, setDialog] = createSignal(null);
   const [menu, setMenu] = createSignal(null);
@@ -119,7 +120,7 @@ export function Sidebar() {
             <For each={state.projects}>
               {(project) => (
                 <div class="project">
-                  <div class="project-row" onClick={() => toggleSection(project.id)} title={project.repo_url}>
+                  <div class="project-row" onClick={() => toggleSection(project.id)} title={project.repo_url || 'Folder project: workspaces start empty'}>
                     <span class="project-caret">{collapsed().has(project.id) ? '▶' : '▼'}</span>
                     <span class="project-name">{project.name}</span>
                     <button
@@ -247,7 +248,7 @@ export function Sidebar() {
       <Show when={dialog()?.kind === 'delete-project'}>
         <ConfirmDialog
           title={`Remove project "${dialog().project.name}"?`}
-          message="This forgets the project and deletes its local mirror. Delete its workspaces first if it still has any."
+          message={`This forgets the project${dialog().project.repo_url ? ' and deletes its local mirror' : ''}. Delete its workspaces first if it still has any.`}
           submitLabel="Remove"
           onConfirm={() => deleteProject(dialog().project.id)}
           onClose={() => setDialog(null)}

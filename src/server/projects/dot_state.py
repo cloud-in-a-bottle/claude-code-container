@@ -19,6 +19,7 @@ PR_CLOSED = "pr_closed"
 CONFLICTED = git_status.CONFLICTED
 CLONING = git_status.CLONING
 UNAVAILABLE = git_status.UNAVAILABLE
+FOLDER = git_status.FOLDER
 
 _PR_STATES = {
     "open": PR_OPEN,
@@ -45,7 +46,7 @@ def dot_state(status: WorkspaceStatus, pull_request: PullRequest | None) -> str:
     push, open a PR. A PR only colours the dot once the work is actually in it -- uncommitted or
     unpushed changes mean what's under review isn't what's on disk, and the dot says so.
     """
-    if status.state in (CLONING, UNAVAILABLE, CONFLICTED):
+    if status.state in (CLONING, UNAVAILABLE, CONFLICTED, FOLDER):
         return status.state
     if status.changed or status.untracked:
         return UNCOMMITTED

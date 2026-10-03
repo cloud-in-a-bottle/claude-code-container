@@ -24,10 +24,12 @@ from server.git_remote import validate_repo_url
 from server.projects.archive import archive_workspace
 from server.projects.archive import unarchive_workspace
 from server.projects.archive_store import load_archive
+from server.projects.git_status import run_git
 from server.projects.launch import start_workspace_tab
 from server.projects.store import Project
 from server.projects.store import add_project
 from server.projects.store import find_project
+from server.projects.store import find_project_by_repo
 from server.projects.store import load_projects
 from server.projects.store import remove_project
 from server.projects.store import save_projects
@@ -100,11 +102,15 @@ def list_projects() -> list[JsonDict]:
 
 @post("/api/projects", status_code=200)
 async def create_project(request: Request[Any, Any, Any]) -> Response[JsonDict]:
-    """Register a git repo as a project. The name defaults to the repo's own name."""
+    """Register a git repo as a project. The name defaults to the repo's own name.
+
+    Without a repo_url it is a folder project instead, whose workspaces start empty; that needs a
+    name, since there is no repo to take one from.
+    """
     data = await json_body(request)
     repo_url = str(data.get("repo_url") or "").strip()
     if not repo_url:
-        return error(400, error="bad_request", message="repo_url is required")
+        return _create_folder_project(data)
     if not validate_repo_url(repo_url):
         return error(400, error="bad_request", message="repo_url must be an http(s)/ssh/git@ clone url")
 
@@ -130,15 +136,29 @@ async def create_project(request: Request[Any, Any, Any]) -> Response[JsonDict]:
     return Response(content=project_json(project))
 
 
+def _create_folder_project(data: JsonDict) -> Response[JsonDict]:
+    name = str(data.get("name") or "").strip()
+    if not name:
+        return error(400, error="bad_request", message="a project without a repo_url needs a name")
+    if str(data.get("default_branch") or "").strip():
+        return error(400, error="bad_request", message="a project without a repo_url has no default_branch")
+    project = add_project(name=name, repo_url="", setup=str(data.get("setup") or ""))
+    return Response(content=project_json(project))
+
+
 @patch("/api/projects/{project_id:str}", status_code=200)
 async def update_project(project_id: FromPath[str], request: Request[Any, Any, Any]) -> Response[JsonDict]:
-    """Edit a project's name, setup command or default branch. Keys left out keep their value."""
+    """Edit a project's name, setup command or default branch. Keys left out keep their value.
+
+    `repo_url` can be set once, on a folder project, to make it an ordinary repo project when the
+    repo it was the start of exists. It is fixed from then on, like any project's.
+    """
     project = find_project(project_id)
     if project is None:
         return error(404, error="not_found", message=f"no project {project_id}")
 
     data = await json_body(request)
-    known = {"name", "setup", "default_branch"}
+    known = {"name", "setup", "default_branch", "repo_url"}
     if not known & data.keys():
         return error(400, error="bad_request", message=f"expected at least one of: {', '.join(sorted(known))}")
 
@@ -146,26 +166,74 @@ async def update_project(project_id: FromPath[str], request: Request[Any, Any, A
     if not name:
         return error(400, error="bad_request", message="name cannot be empty")
 
+    repo_url = str(data.get("repo_url", project.repo_url)).strip()
+    attaching = repo_url != project.repo_url
+    if attaching:
+        refused = await _refuse_attach(project, repo_url)
+        if refused is not None:
+            return refused
+
     default_branch = str(data.get("default_branch", project.default_branch)).strip()
     invalid = _bad_ref(default_branch, "default_branch")
     if invalid is not None:
         return invalid
-    # Only worth a round trip when it actually changed: renaming a project shouldn't wait on the
-    # network, but pointing it at a branch that doesn't exist should fail here, not in a workspace.
-    if default_branch and default_branch != project.default_branch:
-        failed = _access_error(await resolve_access(project.repo_url, default_branch))
+    if default_branch and not repo_url:
+        return error(400, error="bad_request", message="a project without a repo has no default_branch")
+    # Only worth a round trip when something it depends on changed: renaming a project shouldn't
+    # wait on the network, but pointing it at a branch that doesn't exist should fail here, not in a
+    # workspace.
+    if attaching or (default_branch and default_branch != project.default_branch):
+        access = await resolve_access(repo_url, default_branch or "HEAD")
+        if attaching and access.decision == "not_found" and not default_branch:
+            # `HEAD` is missing from a repo nothing has been pushed to yet, which is the likeliest
+            # way to get here: a workspace can't be cloned from it, so it isn't attachable yet.
+            return error(404, error="not_found", message="repository not found, or nothing has been pushed to it yet")
+        failed = _access_error(access)
         if failed is not None:
             return failed
 
     updated = Project(
         id=project.id,
         name=name,
-        repo_url=project.repo_url,
+        repo_url=repo_url,
         setup=str(data.get("setup", project.setup)),
         default_branch=default_branch,
     )
     save_projects(tuple(updated if p.id == project.id else p for p in load_projects()))
     return Response(content=project_json(updated))
+
+
+async def _refuse_attach(project: Project, repo_url: str) -> Response[JsonDict] | None:
+    """Why `repo_url` can't become this project's repo, without touching the network.
+
+    Every workspace has to be a git repo with a commit already: once the project has a repo, a
+    directory without one reads as a clone still in progress, and would sit in the sidebar that way
+    for good.
+    """
+    if project.has_repo:
+        return error(400, error="bad_request", message="a project's repo_url is fixed once set")
+    if not validate_repo_url(repo_url):
+        return error(400, error="bad_request", message="repo_url must be an http(s)/ssh/git@ clone url")
+    # Repo lookups (open-workspace, Linear runs) take the first project on a repo, so a second one
+    # would be a project they can never reach.
+    owner = find_project_by_repo(repo_url)
+    if owner is not None:
+        return error(409, error="already_a_project", message=f"project {owner.id} already has this repo")
+    loose = [w.name for w in list_workspaces(project.id) if not await _has_commits(w)]
+    if loose:
+        return error(
+            409,
+            error="not_a_repo",
+            message=f"these workspaces aren't git repos with a commit yet; commit in or delete them first: {', '.join(loose)}",
+        )
+    return None
+
+
+async def _has_commits(workspace: Workspace) -> bool:
+    if not (workspace.path / ".git").exists():
+        return False
+    rc, _out, _err = await run_git(workspace.path, "rev-parse", "--verify", "--quiet", "HEAD")
+    return rc == 0
 
 
 @delete("/api/projects/{project_id:str}", status_code=200)
@@ -187,7 +255,8 @@ async def delete_project(project_id: FromPath[str]) -> Response[JsonDict]:
 
 @post("/api/workspaces", status_code=200)
 async def create_workspace(request: Request[Any, Any, Any]) -> Response[JsonDict]:
-    """Make a new copy of a project's repo and open it in a Claude tab.
+    """Make a new copy of a project's repo and open it in a Claude tab. In a folder project there is
+    no repo, so the new workspace is an empty directory, and only the setup command runs in it.
 
     The directory is created here so the workspace shows up immediately; the clone itself runs in
     the tab, where its output (and the project's setup command) is something you can watch.
@@ -209,6 +278,14 @@ async def create_workspace(request: Request[Any, Any, Any]) -> Response[JsonDict
     invalid = _bad_ref(ref, "ref")
     if invalid is not None:
         return invalid
+    requested = str(data.get("name") or "").strip()
+
+    if not project.has_repo:
+        if ref:
+            return error(400, error="bad_request", message="a project without a repo has no ref to check out")
+        workspace = Workspace(project_id=project.id, name=unique_workspace_name(project.id, requested or "workspace"))
+        return await _open_new_workspace(project, workspace, mode, ref="", github_token="")
+
     # An explicit ref wins; otherwise the project's configured starting branch.
     ref = ref or project.default_branch
 
@@ -221,14 +298,19 @@ async def create_workspace(request: Request[Any, Any, Any]) -> Response[JsonDict
     # renamed default instead of the one the mirror happened to see when it was first cloned.
     ref = ref or await resolve_default_branch(project.repo_url, access.token)
 
-    requested = str(data.get("name") or "").strip()
     name = unique_workspace_name(project.id, requested or ref or "workspace")
     workspace = Workspace(project_id=project.id, name=name)
+    return await _open_new_workspace(project, workspace, mode, ref=ref, github_token=access.token)
+
+
+async def _open_new_workspace(
+    project: Project, workspace: Workspace, mode: str, ref: str, github_token: str
+) -> Response[JsonDict]:
     create_workspace_dir(workspace)
     # Before the tab starts, because that is what reads it to build the tab's environment.
     pin_workspace_mode(workspace.id, mode)
 
-    tab = await start_workspace_tab(project, workspace, ref=ref, github_token=access.token)
+    tab = await start_workspace_tab(project, workspace, ref=ref, github_token=github_token)
     return Response(
         content={
             "id": workspace.id,

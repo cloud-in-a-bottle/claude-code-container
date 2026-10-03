@@ -162,6 +162,17 @@ class TestBuildingAWorkspace:
         monkeypatch.setenv("WS_REPO", str(bootstrap_env.parent / "nope"))
         assert main() != 0
 
+    def test_a_folder_project_gets_an_empty_dir_and_its_setup(
+        self, bootstrap_env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bootstrap_env.mkdir()
+        monkeypatch.setenv("WS_REPO", "")
+        monkeypatch.setenv("WS_MIRROR", "")
+        monkeypatch.setenv("WS_SETUP", "touch ran-setup")
+        assert main() == 0
+        assert [p.name for p in bootstrap_env.iterdir()] == ["ran-setup"]
+        assert not (tmp_path / "mirrors").exists()
+
     def test_a_failed_mirror_clone_leaves_nothing_behind(
         self, bootstrap_env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

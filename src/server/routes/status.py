@@ -32,9 +32,10 @@ async def workspace_status() -> tuple[WorkspaceView, ...]:
                 continue
             owners[workspace.id] = project
             workspaces.append(workspace)
+    folders = frozenset(workspace_id for workspace_id, project in owners.items() if not project.has_repo)
 
     views: list[WorkspaceView] = []
-    for status in await read_statuses(tuple(workspaces)):
+    for status in await read_statuses(tuple(workspaces), folders):
         pull_request = pull_request_for(owners[status.workspace_id].repo_url, status.branch)
         views.append(
             WorkspaceView(

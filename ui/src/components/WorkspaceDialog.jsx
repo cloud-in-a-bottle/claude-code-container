@@ -4,7 +4,8 @@ import { BILLING_LABELS, billingWarning } from '../billing';
 import { createWorkspace, state } from '../store';
 import { Choice, Field, Modal } from './Modal';
 
-/** Create a workspace: another full copy of the project's repo, cloned from its local mirror. */
+/** Create a workspace: another full copy of the project's repo, cloned from its local mirror — or,
+ *  in a folder project, a new empty directory. */
 export function WorkspaceDialog(props) {
   const [name, setName] = createSignal('');
   const [ref, setRef] = createSignal('');
@@ -22,13 +23,15 @@ export function WorkspaceDialog(props) {
       onClose={props.onClose}
     >
       <Field label="Name" value={name} onInput={setName} placeholder="fix-503" />
-      <Field
-        label="Ref (optional)"
-        value={ref}
-        onInput={setRef}
-        placeholder={`leave blank for ${fallback()}`}
-        hint={`A branch, tag, or commit to check out. Blank starts from ${fallback()}, at its newest commit.`}
-      />
+      <Show when={props.project.repo_url}>
+        <Field
+          label="Ref (optional)"
+          value={ref}
+          onInput={setRef}
+          placeholder={`leave blank for ${fallback()}`}
+          hint={`A branch, tag, or commit to check out. Blank starts from ${fallback()}, at its newest commit.`}
+        />
+      </Show>
       <Choice
         label="Billing"
         value={billing}
