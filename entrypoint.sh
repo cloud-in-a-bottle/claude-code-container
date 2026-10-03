@@ -125,4 +125,7 @@ done
 seed_checkouts &
 
 export OPENHOST_DIR
-exec python3 -m server.app
+# Not a plain exec of the server: nested-podman.sh configures podman and re-execs us inside the
+# namespaces it needs, so that every terminal the server opens can run containers. It never fails
+# startup — if the namespace can't be made it logs and execs the server anyway.
+exec /app/nested-podman.sh python3 -m server.app

@@ -6,6 +6,11 @@ description = "Tabbed terminals preloaded with Claude Code and a cloned openhost
 [runtime.container]
 image = "Dockerfile"
 port = 5000
+# For the podman nested in here: pasta gives a container its own network (and `-p`) by creating a
+# tap device in the container's namespace, which needs /dev/net/tun -- and a device node can't be
+# made from inside a user namespace, so it has to be passed in. nested-podman.sh still forces
+# --network=host until a private network is verified to work in a real deploy.
+devices = ["/dev/net/tun"]
 
 [routing]
 health_check = "/health"
@@ -33,6 +38,12 @@ endpoint = "/open-workspace"
 # repoints HOME there.
 [data]
 app_data = true
+# Scratch that isn't backed up, mounted at /data/app_temp_data/claude-workbench (env:
+# OPENHOST_APP_TEMP_DIR). podman's image store goes here: it has to be on a bind mount from the
+# host, because the overlay driver can't stack on the container's own overlayfs root, but images
+# are recreatable by definition and have no business in a backed-up directory. Losing it costs a
+# re-pull. See nested-podman.sh.
+app_temp_data = true
 
 # Pull ANTHROPIC_API_KEY from the secrets app if it's installed. The fetch is
 # best-effort — if secrets-v2 isn't around or the key isn't set, the terminal

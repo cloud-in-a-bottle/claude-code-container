@@ -44,8 +44,22 @@ def test_the_frontend_bundle_is_in_the_image(stack: OpenhostStack) -> None:
         assert response.content, asset
 
 
-def _podman(*args: str) -> str:
-    return subprocess.run(["podman", *args], capture_output=True, text=True, timeout=60, check=True).stdout.strip()
+def _podman(*args: str, timeout: int = 60) -> str:
+    return subprocess.run(
+        ["podman", *args], capture_output=True, text=True, timeout=timeout, check=True
+    ).stdout.strip()
+
+
+def _in_the_namespace(container: str, *args: str, timeout: int = 60) -> str:
+    """Run a command where the workbench's own terminals run, rather than where `podman exec` lands.
+
+    nested-podman.sh execs the server into namespaces of its own, and pid 2 is that server (pid 1
+    is tini — see the hangup test above). `--preserve-credentials` because nsenter otherwise drops
+    to the target's uid before joining, and uid 0 outside the namespace is the only identity the
+    join is permitted to.
+    """
+    enter = ("nsenter", "--target", "2", "--user", "--mount", "--cgroup", "--preserve-credentials")
+    return _podman("exec", container, *enter, *args, timeout=timeout)
 
 
 def _container_name() -> str:
@@ -109,3 +123,17 @@ def test_a_tab_reports_the_program_its_shell_is_running(stack: OpenhostStack) ->
     """
     program = _podman("exec", _container_name(), "python3", "-c", _PROGRAM_PROBE)
     assert program.splitlines()[-1] == "sleep"
+
+
+def test_podman_can_run_a_container_inside_the_container(stack: OpenhostStack) -> None:
+    """The workbench execs itself into a nested user namespace so that terminals can run podman.
+
+    openhost gives this container neither CAP_SYS_ADMIN nor a cgroup tree it may write, so podman
+    has nowhere to mount an image and nowhere to put a container's cgroup until nested-podman.sh
+    makes both; a container that starts is the only proof that all of it still works.
+    """
+    container = _container_name()
+    # Separate from the run, and generous, because this is the step that reaches the registry.
+    _in_the_namespace(container, "podman", "pull", "-q", "docker.io/library/alpine", timeout=300)
+    output = _in_the_namespace(container, "podman", "run", "--rm", "alpine", "echo", "nested-ok")
+    assert output.splitlines()[-1] == "nested-ok"

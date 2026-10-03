@@ -13,6 +13,7 @@ You work in **projects** and **workspaces** — see [Projects and workspaces](#p
 - A clone of `https://github.com/imbue-openhost/openhost` placed at `~/openhost` on first container start (override with `OPENHOST_REPO_URL` or `OPENHOST_DIR` env vars).
 - A Claude Code skill at `~/.claude/skills/openhost/` that points Claude at the curated docs in the local openhost clone.
 - Global Claude instructions at `~/.claude/CLAUDE.md`, which Claude reads in every workspace. It's a symlink to `claude-home/CLAUDE.md` in this repo, so app updates ship new text automatically. Your own additions go in `~/.claude/CLAUDE.local.md`, which the bundled file imports and the entrypoint never overwrites (an existing `~/.claude/CLAUDE.md` is moved there on first start rather than replaced).
+- `podman`, which really does run containers from in here, nested inside the rootless podman container the workbench itself is — with some sharp edges. See [Podman inside the workbench](#podman-inside-the-workbench).
 - A checkout of this repo at `~/claude-code-container`, so you can work on the workbench from inside the workbench (override with `WORKBENCH_REPO_URL` or `WORKBENCH_DIR`). See the warning below before editing it.
 
 ### Editing the workbench from inside itself
@@ -30,6 +31,24 @@ Authentication for `claude` is whatever the user sets up inside the terminal —
 `HOME` lives on the app's persistent data dir (`/data/app_data/claude-workbench/home`), so a `claude login`, the openhost clone, and shell history all survive container redeploys. The workbench's own prompt, aliases, and PATH fixups live at `/etc/profile.d/workbench.sh` (sourced by both login and non-login interactive bash), so `~/.bashrc` and `~/.bash_profile` are entirely yours — anything you write there sticks around and is never overwritten by image updates.
 
 As a convenience, if the `secrets-v2` app is installed and `ANTHROPIC_API_KEY` is set there, the workbench fetches it on first PTY launch and exports it into every new terminal's environment. This is best-effort — if the secrets app isn't around the terminal still works, you just have to set the key yourself.
+
+## Podman inside the workbench
+
+`podman` works in every terminal: `run`, `build`, volumes, `exec`, `logs`, and the API socket. This
+container is itself a rootless podman container without `CAP_SYS_ADMIN`, so `entrypoint.sh` execs
+the server through [`nested-podman.sh`](nested-podman.sh), which puts the whole workbench in a
+nested user + cgroup namespace where podman can mount things. Its header explains the details.
+
+Containers are forced onto `--network=host`, `--pid=host` and `--uts=host` — the kernel won't let
+anything in here make a private network, procfs or hostname. In practice:
+
+- **No `-p`.** It's ignored; a container binds ports directly on the workbench, so
+  `127.0.0.1:<port>` reaches it anyway. No `podman network` either.
+- **No pid isolation.** `ps` in a container shows the workbench's processes.
+- **One level of nesting.** A container started here can't itself run nested podman like this.
+- Suites that need port publishing — including `just test-integration` — can't run here.
+
+Images live in `$OPENHOST_APP_TEMP_DIR`.
 
 ## GitHub auth (`gh`, pushing, private repos)
 
