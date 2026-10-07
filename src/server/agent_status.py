@@ -114,6 +114,7 @@ def read_reports() -> tuple[AgentReport, ...]:
                 cwd=str(raw.get("cwd", "")),
                 at=float(raw.get("at", 0.0)),
                 message=str(raw.get("message", "")),
+                transcript=str(raw.get("transcript", "")),
             )
         )
     return tuple(sorted(reports, key=lambda r: r.at, reverse=True))

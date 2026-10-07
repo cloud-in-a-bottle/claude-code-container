@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+import attr
 import pytest
 from litestar import Litestar
 from litestar.testing import TestClient
@@ -78,6 +79,7 @@ def write_report(entry: AgentReport) -> None:
                 "cwd": entry.cwd,
                 "at": entry.at,
                 "message": entry.message,
+                "transcript": entry.transcript,
             }
         )
     )
@@ -261,6 +263,21 @@ def test_a_workspace_with_no_agent_gets_no_status(workbench_home: Path) -> None:
     write_report(report("working", "/somewhere/else", at=time.time()))
 
     assert agent_status.statuses_for((workspace,), frozenset()) == ()
+
+
+def test_a_long_turn_stays_working_while_its_transcript_moves(workbench_home: Path, tmp_path: Path) -> None:
+    """The transcript is the only sign of life between a turn's start and end, so it has to
+    survive the trip through the report file -- without it every turn longer than the grace
+    window loses its dot."""
+    workspace = Workspace(project_id="proj", name="ws")
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text("")
+    now = time.time()
+    started = now - agent_status.WORKING_GRACE_SECONDS - 60
+    write_report(attr.evolve(report("working", str(workspace.path), at=started), transcript=str(transcript)))
+
+    statuses = agent_status.statuses_for((workspace,), frozenset(), now)
+    assert [s.state for s in statuses] == ["working"]
 
 
 # ── the route ──────────────────────────────────────────────────────────────────
