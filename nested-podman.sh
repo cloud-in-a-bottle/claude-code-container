@@ -25,16 +25,24 @@
 #     nowhere to put a container's cgroup. Unsharing a cgroup namespace makes our own cgroup the
 #     root of a fresh cgroup2 mount, which we do own and may write.
 #
-# And one thing cannot be arranged at all, which is why containers here run with --network=host,
-# --pid=host and --uts=host (set as defaults in containers.conf below). The kernel will not let a
-# process below the initial user namespace mount a fresh procfs or sysfs unless it can already see a
-# *fully visible* one, and the podman that runs us masks /proc/acpi, /proc/kcore and /sys/firmware.
-# Those masks are locked mounts, so they cannot be undone from in here at any privilege level. A
-# container therefore cannot have a procfs of its own; it gets the workbench's /proc bind-mounted
-# instead, which is only truthful if it shares the pid namespace too. Sharing the network namespace
-# is what makes crun bind-mount /sys rather than mount a fresh sysfs, and is also forced: a network
-# namespace of our own could not be connected to anything, since veth and tap both need authority
-# over the namespace above us (CAP_NET_ADMIN over it, or /dev/net/tun) and we have neither.
+# What cannot be arranged is a procfs of a container's own, which is why containers here run with
+# --pid=host (set as a default in containers.conf below). The kernel will not let a process below the
+# initial user namespace mount a fresh procfs unless it can already see a *fully visible* one, and the
+# podman that runs us masks /proc/acpi, /proc/kcore and friends. Those masks are locked mounts, so
+# nothing in here can undo them at any privilege level. A container gets the workbench's /proc
+# bind-mounted instead, which is only truthful if it shares the pid namespace too.
+#
+# Networking is pasta, through the /dev/net/tun that openhost.toml asks for, so containers get a
+# network namespace of their own and `-p` works. openhost points apps at the router through
+# host.containers.internal, which in production is a dummy interface on 10.200.0.1. Making one needs
+# CAP_NET_ADMIN over our network namespace, which belongs to the namespace above us, so instead pasta
+# maps 10.200.0.1 onto this container's loopback, where a router under test is listening anyway.
+# That also means a nested container can reach anything listening on the workbench's loopback, as
+# it already could under the --network=host this replaced.
+#
+# Hostnames: sethostname(2) is refused even in a UTS namespace we own (the seccomp filter on this
+# container gates it on CAP_SYS_ADMIN), so the runtime is a crun wrapper that drops the hostname.
+# See bin/crun-without-hostname.
 #
 # Failures here are logged and stepped over rather than fatal, for the same reason as the rest of
 # entrypoint.sh: a workbench without podman is still a workbench, one that won't boot is not.
@@ -102,13 +110,19 @@ EOF
     # distro's containers-common still apply underneath.
     cat > /etc/containers/containers.conf.d/00-workbench.conf <<'EOF'
 # Written by nested-podman.sh at container start. Edits here are replaced on the next restart.
+# The header of nested-podman.sh explains each of these.
 [containers]
-# Forced, not merely defaulted: see the header of nested-podman.sh. Overriding any of these on a
-# `podman run` gets you "OCI permission denied" from crun, not a working container.
-netns = "host"
+# Forced: --pid=private gets you "OCI permission denied" from crun, not a working container.
 pidns = "host"
-utsns = "host"
 mounts = ["type=bind,source=/proc,destination=/proc,rw=true"]
+# Podman's own default would be a netavark bridge, which needs a veth in our network namespace.
+netns = "pasta"
+# Its default sysctls are written through /proc/sys, which arrives read-only.
+default_sysctls = []
+host_containers_internal_ip = "10.200.0.1"
+
+[network]
+pasta_options = ["--map-host-loopback", "10.200.0.1"]
 
 [engine]
 # No systemd in this container, so neither the systemd cgroup manager nor the journald event logger
@@ -116,6 +130,9 @@ mounts = ["type=bind,source=/proc,destination=/proc,rw=true"]
 cgroup_manager = "cgroupfs"
 events_logger = "file"
 runtime = "crun"
+
+[engine.runtimes]
+crun = ["/usr/local/libexec/crun-without-hostname"]
 EOF
 
     # What `--userns=auto` and `--uidmap` are allowed to hand out. Derived rather than baked into

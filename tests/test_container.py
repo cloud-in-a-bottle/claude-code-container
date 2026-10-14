@@ -137,3 +137,32 @@ def test_podman_can_run_a_container_inside_the_container(stack: OpenhostStack) -
     _in_the_namespace(container, "podman", "pull", "-q", "docker.io/library/alpine", timeout=300)
     output = _in_the_namespace(container, "podman", "run", "--rm", "alpine", "echo", "nested-ok")
     assert output.splitlines()[-1] == "nested-ok"
+
+
+_ONE_LINE_SERVER = (
+    'while true; do printf "HTTP/1.1 200 OK\\r\\nContent-Length: 3\\r\\n\\r\\nok\\n" | nc -l -p 8080; done'
+)
+
+
+def test_a_nested_container_can_publish_a_port(stack: OpenhostStack) -> None:
+    """`-p` works because pasta gives nested containers a network, through openhost.toml's /dev/net/tun.
+
+    `--hostname` is in here too because openhost passes it to every app, and sethostname is refused
+    in this container — nested-podman.sh's crun wrapper is what lets such a container start at all.
+    """
+    container = _container_name()
+    _in_the_namespace(container, "podman", "pull", "-q", "docker.io/library/alpine", timeout=300)
+    _in_the_namespace(
+        container,
+        *("podman", "run", "-d", "--name", "published", "--hostname", "published"),
+        *("-p", "127.0.0.1:18080:8080", "alpine", "sh", "-c", _ONE_LINE_SERVER),
+    )
+    try:
+        body = _in_the_namespace(
+            container,
+            *("curl", "-s", "--retry", "10", "--retry-connrefused", "--retry-delay", "1"),
+            "http://127.0.0.1:18080/",
+        )
+        assert body == "ok"
+    finally:
+        _in_the_namespace(container, "podman", "rm", "-f", "published")

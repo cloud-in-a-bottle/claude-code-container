@@ -1,0 +1,27 @@
+#!/bin/sh
+#
+# crun, minus the hostname. nested-podman.sh registers this as the podman runtime named "crun".
+#
+# Containers here get a UTS namespace of their own, but sethostname(2) is refused inside it: the
+# seccomp filter on this whole container (openhost's podman default) only allows it with
+# CAP_SYS_ADMIN in the initial namespace, which we will never have. crun treats that failure as
+# fatal, and openhost passes --hostname to every app it runs, so without this no app could start.
+#
+# Dropping .hostname from the bundle's config.json lets the container start. /etc/hostname still
+# names the container, since podman writes that file itself; only uname(2) reports the
+# workbench's hostname instead.
+
+bundle=""
+prev=""
+for arg in "$@"; do
+    case "$prev" in --bundle | -b) bundle=$arg ;; esac
+    case "$arg" in --bundle=*) bundle=${arg#--bundle=} ;; esac
+    prev=$arg
+done
+
+config="$bundle/config.json"
+if [ -n "$bundle" ] && [ -f "$config" ] && jq -e 'has("hostname")' "$config" >/dev/null; then
+    jq 'del(.hostname)' "$config" > "$config.without-hostname" && mv "$config.without-hostname" "$config"
+fi
+
+exec /usr/bin/crun "$@"

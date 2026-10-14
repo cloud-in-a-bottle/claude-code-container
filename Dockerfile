@@ -2,15 +2,23 @@ FROM ubuntu:26.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# podman runs nested inside this container; crun is named explicitly because it is only a
-# co-dependency of podman's (runc would satisfy it) and nested-podman.sh asks for it by name.
+# podman runs nested inside this container. crun is named explicitly because it is only a
+# co-dependency of podman's (runc would satisfy it) and nested-podman.sh asks for it by name; passt
+# provides pasta, which gives nested containers their network; iproute2 is for looking at it.
+#
+# The second list is what Playwright's Chromium needs to run, for the browser tests in an app's
+# integration suite. `playwright install-deps` would normally install these, but it refuses this
+# Ubuntu release. Without fonts the pages render with no text and clicks land nowhere.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gh glab \
         git tini bash sudo less vim man-db ca-certificates curl wget gnupg \
         nodejs npm \
         htop tree jq ripgrep fd-find fzf tmux ncdu \
         unzip zip file \
-        podman crun \
+        podman crun passt iproute2 \
+        libnss3 libnspr4 libdbus-1-3 libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64 \
+        libx11-6 libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 libxrandr2 libxkbcommon0 \
+        libgbm1 libasound2t64 fontconfig fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
@@ -66,8 +74,11 @@ COPY skills/ ./skills/
 COPY claude-home/ ./claude-home/
 # `linear` goes on PATH for every terminal: a Claude working a Linear issue posts back to the issue
 # with it, and it needs no credentials of its own because latchkey injects them.
+# crun-without-hostname is the nested podman's runtime; see nested-podman.sh.
 COPY bin/ ./bin/
-RUN chmod +x /app/entrypoint.sh /app/nested-podman.sh && install -m 0755 /app/bin/linear /usr/local/bin/linear
+RUN chmod +x /app/entrypoint.sh /app/nested-podman.sh \
+    && install -m 0755 /app/bin/linear /usr/local/bin/linear \
+    && install -D -m 0755 /app/bin/crun-without-hostname /usr/local/libexec/crun-without-hostname
 
 # The app. `uv sync` installs the project editable, so it points at /app/src rather than copying
 # it, and the server serves its templates and static files from there.
