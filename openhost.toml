@@ -22,7 +22,7 @@ public_paths = ["/api/linear/webhook"]
 
 [resources]
 memory_mb = 4096
-cpu_cores = 1.0
+cpu_cores = 4.0
 
 # claude-workbench is the first provider of the open-workspace service: a valid
 # repo + ref redirects the user into a checkout of that repo at that commit.
