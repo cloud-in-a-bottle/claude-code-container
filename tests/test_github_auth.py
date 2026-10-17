@@ -3,6 +3,9 @@
 The two failures these cover are the ones that silently left gh logged out: minting without an
 `account` (always `permission_required`), and `gh auth login --with-token` rejecting a
 `repo`-scoped token for want of `read:org`.
+
+Tokens are asked for with `read:org` too, because gh's GraphQL queries need it, and fall back to
+`repo` alone while that wider grant is unapproved.
 """
 
 from __future__ import annotations
@@ -27,7 +30,7 @@ def run[T](coro: Coroutine[Any, Any, T]) -> T:
 
 @pytest.fixture(autouse=True)
 def _forget_cached_account(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(remote_services, "_github_account", None)
+    monkeypatch.setattr(remote_services, "_github_accounts", {})
 
 
 def fake_oauth(
@@ -93,7 +96,41 @@ def test_mint_reresolves_the_account_after_a_failure(monkeypatch: pytest.MonkeyP
     )
     assert run(remote_services.mint_github_token()) is None
     run(remote_services.mint_github_token())
-    assert [c["endpoint"] for c in calls] == ["accounts", "token", "accounts", "token"]
+    # Each attempt tries the wide scope set, then the fallback.
+    assert [c["endpoint"] for c in calls] == ["accounts", "token"] * 4
+
+
+def test_mint_asks_for_read_org(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without it gh's GraphQL queries fail outright, `gh pr view` among them."""
+    calls = fake_oauth(
+        monkeypatch,
+        {"accounts": (200, {"accounts": ["octocat"]}), "token": (200, {"access_token": "ghs_abc"})},
+    )
+    run(remote_services.mint_github_token())
+    assert {c["endpoint"]: c["scopes"] for c in calls} == {
+        "accounts": ["repo", "read:org"],
+        "token": ["repo", "read:org"],
+    }
+
+
+def test_mint_falls_back_to_repo_until_read_org_is_granted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Widening the scopes mustn't log gh out while the wider grant waits for approval."""
+    calls: list[dict[str, Any]] = []
+
+    async def _call(endpoint: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        calls.append({"endpoint": endpoint, **payload})
+        if payload["scopes"] != ["repo"]:
+            return 403, {"error": "permission_required"}
+        if endpoint == "accounts":
+            return 200, {"accounts": ["octocat"]}
+        return 200, {"access_token": "ghs_narrow"}
+
+    monkeypatch.setattr(remote_services, "_call_oauth", _call)
+    minted = run(remote_services.mint_github_token())
+    assert minted is not None
+    assert minted.token == "ghs_narrow"
+    assert minted.account == "octocat"
+    assert [c["scopes"] for c in calls if c["endpoint"] == "token"] == [["repo", "read:org"], ["repo"]]
 
 
 def test_accounts_are_deduped_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
