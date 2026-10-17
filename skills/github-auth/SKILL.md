@@ -5,11 +5,11 @@ description: Authenticate gh and git inside the workbench using openhost's oauth
 
 # GitHub auth in the workbench
 
-The workbench logs `gh` in by itself at startup and re-mints the token before it expires, so normally there is nothing to do — check `gh auth status` before assuming otherwise. `gh auth status` warning that `read:org` is missing is expected and harmless: the grant is `repo`-scoped and everything except org listings works.
+The workbench logs `gh` in by itself at startup and re-mints the token before it expires, so normally there is nothing to do — check `gh auth status` before assuming otherwise. The token is minted with `repo` and `read:org`. If `gh auth status` warns that `read:org` is missing, the workbench has fallen back to a `repo`-only token because the wider grant hasn't been approved — and that is *not* harmless: gh's GraphQL queries (`gh pr view`, among others) then fail with "requires one of the following scopes: ['read:org']". Don't keep retrying them or route around it; get the approval URL as described below and hand it to the user.
 
 When it really is logged out, the grant is usually missing.
 
-**Read the "GitHub auth" section of `/app/README.md` first** (that's this repo's `README.md`, baked into the image). It has the exact commands for listing granted accounts, minting a token, and using it — along with the two failures that block almost every attempt (`account` being required, and `gh auth login --with-token` rejecting the token for want of `read:org`). Follow it rather than improvising; don't ask the user for a personal access token until that flow has actually failed.
+**Read the "GitHub auth" section of `/app/README.md` first** (that's this repo's `README.md`, baked into the image). It has the exact commands for listing granted accounts, minting a token, and using it — along with the two failures that block almost every attempt (`account` being required, and `gh auth login --with-token` rejecting a token without `read:org`). Follow it rather than improvising; don't ask the user for a personal access token until that flow has actually failed.
 
 What follows is only the judgement that doesn't belong in a reference doc.
 

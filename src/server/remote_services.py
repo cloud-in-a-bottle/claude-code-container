@@ -20,7 +20,12 @@ APP_TOKEN = os.environ.get("OPENHOST_APP_TOKEN", "")
 SECRETS_SHORTNAME = "secrets"
 OAUTH_SHORTNAME = "oauth"
 
-GITHUB_SCOPES = ["repo"]
+# `read:org` isn't for listing orgs: gh's GraphQL queries ask for team reviewers' names, and GitHub
+# refuses the whole query without it, so `gh pr view` fails outright on a `repo`-only token.
+GITHUB_SCOPES = ["repo", "read:org"]
+# What to fall back to until the wider grant is approved. The oauth app keys grants and stored
+# tokens by the exact scope set, so asking for more can't silently reuse what was approved before.
+GITHUB_FALLBACK_SCOPES = ["repo"]
 GH_HOSTS_PATH = HOME / ".config" / "gh" / "hosts.yml"
 # Written next to hosts.yml only when *we* authenticated gh. Its absence next to an existing
 # hosts.yml means the user logged in themselves, and we leave their credentials alone.
@@ -45,7 +50,8 @@ _anthropic_lock = asyncio.Lock()
 _linear_webhook_secret: str | None = None
 _linear_webhook_lock = asyncio.Lock()
 _linear_webhook_missing_since: float = 0.0
-_github_account: str | None = None
+# The account each scope set last minted for, keyed by that scope set.
+_github_accounts: dict[tuple[str, ...], str] = {}
 
 
 @attr.s(auto_attribs=True, frozen=True)
@@ -128,9 +134,9 @@ def _with_return_to(url: str) -> str:
     return urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(query)))
 
 
-async def fetch_github_accounts() -> list[str]:
-    """GitHub logins that have an oauth grant, in order, deduped. [] if unavailable."""
-    status, body = await _call_oauth("accounts", {"provider": "github", "scopes": GITHUB_SCOPES})
+async def fetch_github_accounts(scopes: list[str] = GITHUB_SCOPES) -> list[str]:
+    """GitHub logins that have an oauth grant for `scopes`, in order, deduped. [] if unavailable."""
+    status, body = await _call_oauth("accounts", {"provider": "github", "scopes": scopes})
     if status != 200:
         return []
     raw = body.get("accounts")
@@ -140,29 +146,42 @@ async def fetch_github_accounts() -> list[str]:
 
 
 async def mint_github_token() -> GithubToken | None:
-    """Mint a `repo`-scoped GitHub token via the oauth-v2 app. None if unavailable.
+    """Mint a GitHub token via the oauth-v2 app. None if unavailable.
+
+    Asks for GITHUB_SCOPES and settles for GITHUB_FALLBACK_SCOPES, so that widening the scopes
+    doesn't log gh out while the wider grant waits for the user's approval.
+    """
+    for scopes in (GITHUB_SCOPES, GITHUB_FALLBACK_SCOPES):
+        minted = await _mint_github_token(scopes)
+        if minted:
+            return minted
+    return None
+
+
+async def _mint_github_token(scopes: list[str]) -> GithubToken | None:
+    """Mint a token for exactly `scopes`. None if that scope set isn't granted.
 
     `account` is required in practice: it defaults to "default", which only resolves when exactly
     one account is connected and otherwise returns 401. So ask which accounts exist and name one,
     falling back to "default" when the listing itself is unavailable.
     """
-    global _github_account
-    account = _github_account
+    key = tuple(scopes)
+    account = _github_accounts.get(key)
     if not account:
-        accounts = await fetch_github_accounts()
+        accounts = await fetch_github_accounts(scopes)
         account = accounts[0] if accounts else "default"
 
     status, body = await _call_oauth(
-        "token", {"provider": "github", "scopes": GITHUB_SCOPES, "account": account, "return_to": "/"}
+        "token", {"provider": "github", "scopes": scopes, "account": account, "return_to": "/"}
     )
     if status != 200:
         # A stale cached account (revoked, renamed) would fail forever otherwise.
-        _github_account = None
+        _github_accounts.pop(key, None)
         return None
     token = str(body.get("access_token") or "").strip()
     if not token:
         return None
-    _github_account = account
+    _github_accounts[key] = account
     return GithubToken(token=token, account=account, expires_at=_parse_expiry(body.get("expires_at")))
 
 
@@ -214,9 +233,9 @@ async def seed_oh_config() -> None:
 def _write_gh_hosts(token: str, login: str) -> None:
     """Point the gh CLI at `token` by writing its hosts.yml directly.
 
-    `gh auth login --with-token` is the documented path but it refuses this token: it insists on
-    the `read:org` scope, which our `repo`-scoped grant doesn't include and doesn't need. Writing
-    the file gh would have written skips that check. JSON scalars are valid YAML, so json.dumps
+    `gh auth login --with-token` is the documented path but it refuses a token without the
+    `read:org` scope, which is what we hold until the wider grant is approved. Writing the file gh
+    would have written skips that check. JSON scalars are valid YAML, so json.dumps
     handles the quoting.
     """
     GH_HOSTS_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -288,7 +307,7 @@ def _gh_is_ours() -> bool:
     """Whether gh's stored credentials are ones we wrote.
 
     A hosts.yml without our marker belongs to the user — they ran `gh auth login` themselves, and
-    overwriting it with a short-lived `repo`-scoped token would be a downgrade they didn't ask for.
+    overwriting it with a short-lived narrowly-scoped token would be a downgrade they didn't ask for.
     """
     return GH_MANAGED_MARKER.exists() or not GH_HOSTS_PATH.exists()
 

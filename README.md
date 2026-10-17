@@ -70,27 +70,29 @@ The workbench mints a GitHub token through openhost's `oauth-v2` app, and logs `
 Two things about the flow are non-obvious, and both used to break it:
 
 - **`account` is required.** It defaults to `"default"`, which only resolves when exactly one account is connected and otherwise returns `401`. So `mint_github_token()` calls `/accounts` first and names a login explicitly, falling back to `"default"` only when that listing is unavailable.
-- **`gh auth login --with-token` rejects the token**, insisting on `read:org`, which the `repo`-scoped grant doesn't include and doesn't need. So `_write_gh_hosts()` writes `~/.config/gh/hosts.yml` directly — the file `gh` would have written — and `gh auth setup-git` points git's credential helper at it.
+- **`gh auth login --with-token` rejects a token without `read:org`**, which is what the workbench holds until the wider grant below is approved. So `_write_gh_hosts()` writes `~/.config/gh/hosts.yml` directly — the file `gh` would have written — and `gh auth setup-git` points git's credential helper at it.
 
 It also gives git an identity from the same account — `user.name` and `user.email` in `~/.gitconfig` — because without one `git commit` fails outright with *"Author identity unknown"*, which is a poor first thing to meet in a workbench that has just logged you in. Most accounts keep their email private, so it falls back to the account's `ID+login@users.noreply.github.com` address: that attributes the commit without publishing an address you chose not to publish.
+
+The token is asked for with `read:org` as well as `repo`. That isn't about org listings: gh's GraphQL queries ask for team reviewers' names, and GitHub refuses the *whole* query without `read:org`, so `gh pr view` and friends fail outright on a `repo`-only token. The oauth app keys grants and tokens by the exact scope set, though, so the wider set needs its own approval — until it has one, the workbench falls back to `repo` alone, keeping push, clone and REST calls working.
 
 Nothing you set yourself is clobbered. `hosts.yml` is only rewritten when `~/.workbench/gh-auth-managed` marks it as the workbench's own, and the identity only fills in whichever of `user.name` / `user.email` is unset.
 
 ### When it hasn't happened
 
-If `gh auth status` says logged out, the grant is usually missing. Ask for one:
+If `gh auth status` says logged out — or warns that `read:org` is missing, meaning it fell back to `repo` alone — the grant is usually missing. Ask for one:
 
 ```bash
 # the accounts that have grants (may repeat a name; dedupe it)
 curl -s -X POST "$OPENHOST_ROUTER_URL/api/services/v2/call/oauth/accounts" \
   -H "Authorization: Bearer $OPENHOST_APP_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"provider":"github","scopes":["repo"]}'
+  -d '{"provider":"github","scopes":["repo","read:org"]}'
 
 curl -s -X POST "$OPENHOST_ROUTER_URL/api/services/v2/call/oauth/token" \
   -H "Authorization: Bearer $OPENHOST_APP_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"provider":"github","scopes":["repo"],"account":"<login>","return_to":"/"}'
+  -d '{"provider":"github","scopes":["repo","read:org"],"account":"<login>","return_to":"/"}'
 ```
 
 A `403 permission_required` carries a `grant_url`; a `401 authorization_required` carries an `authorize_url`. Both are browser flows only the user can complete — open the URL and approve, then restart the app (or wait for the next refresh). Give `return_to` a value starting with `/`; the provider ignores anything else, so a blank one drops you somewhere unhelpful.
