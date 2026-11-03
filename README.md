@@ -121,6 +121,7 @@ A **project** is a git repo you've told the workbench about: a name, a clone URL
 ~/.workbench/mirrors/<project>.git    one bare mirror per project
 ~/workspaces/<project>/<workspace>/   the workspaces themselves
 ~/.workbench/archive.json             which workspaces are archived, and the tabs to bring back
+~/.workbench/archive-retention.json   how many days an archived workspace is kept before it is deleted
 ```
 
 The mirror is what makes a second workspace cheap: the first one pays for a network clone into the mirror, and every workspace after that is a local clone from it (hardlinked objects, so near-instant and nearly free on disk). Each workspace's `origin` is rewritten to the real remote afterwards, so `git push`, `git pull` and anything reading the remote behave exactly as in an ordinary checkout.
@@ -156,6 +157,8 @@ Deleting a workspace deletes the directory and kills its terminals, and is not r
 A workspace you're done with for now, but not done with, can be **archived**: right-click it in the sidebar and choose *Archive*. That closes everything it is running — every terminal, the Claude sessions inside them, its editor — and moves it into an **Archived** section under its project, collapsible and folded out of the way of the work in progress.
 
 Nothing on disk is touched. The directory, the branch, the uncommitted changes and the Claude transcripts are all exactly where they were; archiving is about processes, not about work. An archived workspace also drops out of the sidebar's polls, so it costs no `git status` and no agent-status reads — which, along with the memory its terminals and editor were holding, is most of what you get back for archiving one.
+
+Archiving doesn't keep a workspace forever, though. Once it has been archived for longer than the retention set on the settings page — **14 days** unless you change it, 0 to keep archives forever — an hourly sweep deletes it outright, directory and all, exactly as *Delete* would. Unpushed work goes with it. The clock runs from the most recent archive, so unarchiving and archiving again restarts it.
 
 Unarchive by clicking the row (or right-click → *Unarchive*). The terminals come back as they were — the same tabs, with the same names and in the same dock layout — and each Claude tab resumes the conversation it was in rather than starting a fresh one, because a tab pins its `--session-id` and the archive records it. A terminal sitting in a subdirectory that has since been deleted comes back in the workspace root instead of not at all.
 

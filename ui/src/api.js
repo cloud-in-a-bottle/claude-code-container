@@ -69,8 +69,8 @@ export async function uploadPastedImage(blob) {
 export const getUiSettings = () => request('GET', '/api/ui/settings');
 export const saveUiSettings = (patch) => request('POST', '/api/ui/settings', patch);
 
-/** Workbench settings: which billing mode new workspaces get, and whether each one has
- *  credentials. The subscription half runs `claude auth status` in the container, so this is a
+/** Workbench settings: which billing mode new workspaces get, whether each one has
+ *  credentials, and how long archived workspaces are kept. The subscription half runs `claude auth status` in the container, so this is a
  *  request to make on demand rather than on a poll. */
 export const getSettings = () => request('GET', '/api/settings');
 export const saveSettings = (patch) => request('POST', '/api/settings', patch);

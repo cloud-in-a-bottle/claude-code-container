@@ -1,10 +1,10 @@
 import { Show, createSignal, onCleanup, onMount } from 'solid-js';
 
 import { BILLING_LABELS } from '../billing';
-import { refreshSettings, saveDefaultBilling, state } from '../store';
+import { refreshSettings, saveArchiveRetention, saveDefaultBilling, state } from '../store';
 
-/** The settings page: which billing mode new workspaces get, and whether each mode has anything
- *  to bill to. The subscription half is where `claude auth login` gets explained, since that is
+/** The settings page: which billing mode new workspaces get, whether each mode has anything to
+ *  bill to, and how long archived workspaces are kept before they are deleted. The subscription half is where `claude auth login` gets explained, since that is
  *  the one credential the workbench can't fetch for you.
  *
  *  Reads through to the server on open — the login state lives in ~/.claude and can change from
@@ -32,6 +32,21 @@ export function SettingsDialog(props) {
     setError('');
     try {
       await saveDefaultBilling(mode);
+    } catch (err) {
+      setError(err.message || String(err));
+    }
+  }
+
+  async function chooseRetention(input) {
+    setError('');
+    const days = Number(input.value);
+    if (!Number.isInteger(days) || days < 0) {
+      setError('Keep archived workspaces for 0 (forever) or a whole number of days.');
+      input.value = settings()?.archive_retention_days ?? '';
+      return;
+    }
+    try {
+      await saveArchiveRetention(days);
     } catch (err) {
       setError(err.message || String(err));
     }
@@ -66,6 +81,25 @@ export function SettingsDialog(props) {
             Each workspace is created with one of these and keeps it, so changing this leaves
             existing workspaces — and the conversations in them — on what they started with. The
             workspace dialog can override it per workspace.
+          </p>
+        </section>
+
+        <section>
+          <h3>Archived workspaces</h3>
+          <label>
+            Delete after (days)
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={settings()?.archive_retention_days ?? ''}
+              disabled={!settings()}
+              onChange={(e) => chooseRetention(e.currentTarget)}
+            />
+          </label>
+          <p class="wb-hint">
+            An archived workspace's directory is deleted for good once it has been archived this
+            long, along with any work in it that was never pushed. 0 keeps them forever.
           </p>
         </section>
 

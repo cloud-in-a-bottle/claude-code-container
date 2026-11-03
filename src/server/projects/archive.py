@@ -3,7 +3,8 @@
 Archiving closes everything a workspace is running — its terminals, the Claude sessions inside
 them, its editor — and writes down what was running so unarchiving can start the same terminals
 again, each Claude tab resuming the conversation it was in. The workspace directory itself is
-never touched: archiving is about processes, not about work on disk.
+never touched: archiving is about processes, not about work on disk. (Staying archived past the
+retention setting does delete it — that is archive_reaper.py, not this.)
 
 Both operations are two steps that can be interrupted between, so each is ordered to fail towards
 the same harmless state — the workspace listed as live with no terminals open, which is exactly

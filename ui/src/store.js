@@ -96,6 +96,11 @@ export async function saveDefaultBilling(mode) {
   setState('settings', await api.saveSettings({ default_billing: mode }));
 }
 
+/** Change how many days an archived workspace is kept before it is deleted; 0 keeps it forever. */
+export async function saveArchiveRetention(days) {
+  setState('settings', await api.saveSettings({ archive_retention_days: days }));
+}
+
 export async function refreshStatus() {
   const statuses = await api.listWorkspaceStatus();
   setState('status', Object.fromEntries(statuses.map((s) => [s.workspace_id, s])));
