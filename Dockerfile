@@ -12,7 +12,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gh glab \
         git tini bash sudo less vim man-db ca-certificates curl wget gnupg \
-        nodejs npm \
         htop tree jq ripgrep fd-find fzf tmux ncdu \
         unzip zip file \
         podman crun passt iproute2 \
@@ -22,6 +21,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Node from the official image rather than apt: Ubuntu's npm package splits npm's own dependency
+# tree into a few hundred separate node-* packages.
+COPY --from=node:24-bookworm-slim /usr/local/bin/node /usr/local/bin/node
+COPY --from=node:24-bookworm-slim /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
 # Root inside the container is an unprivileged host user (rootless podman, cap-drop=ALL,
 # no-new-privileges), so runtime `apt-get install` works without sudo — which
