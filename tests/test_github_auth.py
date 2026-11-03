@@ -96,20 +96,21 @@ def test_mint_reresolves_the_account_after_a_failure(monkeypatch: pytest.MonkeyP
     )
     assert run(remote_services.mint_github_token()) is None
     run(remote_services.mint_github_token())
-    # Each attempt tries the wide scope set, then the fallback.
-    assert [c["endpoint"] for c in calls] == ["accounts", "token"] * 4
+    # Each attempt tries the wide scope set, then each fallback.
+    assert [c["endpoint"] for c in calls] == ["accounts", "token"] * 6
 
 
-def test_mint_asks_for_read_org(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Without it gh's GraphQL queries fail outright, `gh pr view` among them."""
+def test_mint_asks_for_read_org_and_workflow(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without read:org gh's GraphQL queries fail outright, `gh pr view` among them; without
+    workflow, pushing a change to `.github/workflows/` is refused."""
     calls = fake_oauth(
         monkeypatch,
         {"accounts": (200, {"accounts": ["octocat"]}), "token": (200, {"access_token": "ghs_abc"})},
     )
     run(remote_services.mint_github_token())
     assert {c["endpoint"]: c["scopes"] for c in calls} == {
-        "accounts": ["repo", "read:org"],
-        "token": ["repo", "read:org"],
+        "accounts": ["repo", "read:org", "workflow"],
+        "token": ["repo", "read:org", "workflow"],
     }
 
 
@@ -130,7 +131,33 @@ def test_mint_falls_back_to_repo_until_read_org_is_granted(monkeypatch: pytest.M
     assert minted is not None
     assert minted.token == "ghs_narrow"
     assert minted.account == "octocat"
-    assert [c["scopes"] for c in calls if c["endpoint"] == "token"] == [["repo", "read:org"], ["repo"]]
+    assert [c["scopes"] for c in calls if c["endpoint"] == "token"] == [
+        ["repo", "read:org", "workflow"],
+        ["repo", "read:org"],
+        ["repo"],
+    ]
+
+
+def test_mint_prefers_read_org_while_workflow_is_unapproved(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Adding `workflow` mustn't drop gh back to a repo-only token that breaks GraphQL."""
+    calls: list[dict[str, Any]] = []
+
+    async def _call(endpoint: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        calls.append({"endpoint": endpoint, **payload})
+        if "workflow" in payload["scopes"]:
+            return 403, {"error": "permission_required"}
+        if endpoint == "accounts":
+            return 200, {"accounts": ["octocat"]}
+        return 200, {"access_token": "ghs_" + "_".join(payload["scopes"])}
+
+    monkeypatch.setattr(remote_services, "_call_oauth", _call)
+    minted = run(remote_services.mint_github_token())
+    assert minted is not None
+    assert minted.token == "ghs_repo_read:org"
+    assert [c["scopes"] for c in calls if c["endpoint"] == "token"] == [
+        ["repo", "read:org", "workflow"],
+        ["repo", "read:org"],
+    ]
 
 
 def test_accounts_are_deduped_in_order(monkeypatch: pytest.MonkeyPatch) -> None:

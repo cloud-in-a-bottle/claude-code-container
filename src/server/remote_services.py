@@ -22,10 +22,12 @@ OAUTH_SHORTNAME = "oauth"
 
 # `read:org` isn't for listing orgs: gh's GraphQL queries ask for team reviewers' names, and GitHub
 # refuses the whole query without it, so `gh pr view` fails outright on a `repo`-only token.
-GITHUB_SCOPES = ["repo", "read:org"]
-# What to fall back to until the wider grant is approved. The oauth app keys grants and stored
-# tokens by the exact scope set, so asking for more can't silently reuse what was approved before.
-GITHUB_FALLBACK_SCOPES = ["repo"]
+# `workflow` is what GitHub demands to push a commit that adds or changes `.github/workflows/*`.
+GITHUB_SCOPES = ["repo", "read:org", "workflow"]
+# What to fall back to, widest first, until the wider grant is approved. The oauth app keys grants
+# and stored tokens by the exact scope set, so asking for more can't silently reuse what was
+# approved before.
+GITHUB_FALLBACK_SCOPES = [["repo", "read:org"], ["repo"]]
 GH_HOSTS_PATH = HOME / ".config" / "gh" / "hosts.yml"
 # Written next to hosts.yml only when *we* authenticated gh. Its absence next to an existing
 # hosts.yml means the user logged in themselves, and we leave their credentials alone.
@@ -148,10 +150,10 @@ async def fetch_github_accounts(scopes: list[str] = GITHUB_SCOPES) -> list[str]:
 async def mint_github_token() -> GithubToken | None:
     """Mint a GitHub token via the oauth-v2 app. None if unavailable.
 
-    Asks for GITHUB_SCOPES and settles for GITHUB_FALLBACK_SCOPES, so that widening the scopes
+    Asks for GITHUB_SCOPES and settles for the widest of GITHUB_FALLBACK_SCOPES that is granted, so that widening the scopes
     doesn't log gh out while the wider grant waits for the user's approval.
     """
-    for scopes in (GITHUB_SCOPES, GITHUB_FALLBACK_SCOPES):
+    for scopes in (GITHUB_SCOPES, *GITHUB_FALLBACK_SCOPES):
         minted = await _mint_github_token(scopes)
         if minted:
             return minted

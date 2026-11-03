@@ -5,7 +5,7 @@ description: Authenticate gh and git inside the workbench using openhost's oauth
 
 # GitHub auth in the workbench
 
-The workbench logs `gh` in by itself at startup and re-mints the token before it expires, so normally there is nothing to do — check `gh auth status` before assuming otherwise. The token is minted with `repo` and `read:org`. If `gh auth status` warns that `read:org` is missing, the workbench has fallen back to a `repo`-only token because the wider grant hasn't been approved — and that is *not* harmless: gh's GraphQL queries (`gh pr view`, among others) then fail with "requires one of the following scopes: ['read:org']". Don't keep retrying them or route around it; get the approval URL as described below and hand it to the user.
+The workbench logs `gh` in by itself at startup and re-mints the token before it expires, so normally there is nothing to do — check `gh auth status` before assuming otherwise. The token is minted with `repo`, `read:org` and `workflow`. If `gh auth status` shows no `workflow` scope, pushes of commits touching `.github/workflows/` will be refused ("refusing to allow an OAuth App to create or update workflow ... without `workflow` scope") — same fix: get the approval URL below and hand it to the user. If `gh auth status` warns that `read:org` is missing, the workbench has fallen back to a `repo`-only token because the wider grant hasn't been approved — and that is *not* harmless: gh's GraphQL queries (`gh pr view`, among others) then fail with "requires one of the following scopes: ['read:org']". Don't keep retrying them or route around it; get the approval URL as described below and hand it to the user.
 
 When it really is logged out, the grant is usually missing.
 
