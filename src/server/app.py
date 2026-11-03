@@ -15,6 +15,7 @@ from server.editor import instances as editor_instances
 from server.editor.settings import apply_theme
 from server.editor.settings import ensure_shared_config
 from server.linear.reaper import reap_periodically
+from server.projects.archive_reaper import reap_archives_periodically
 from server.projects.seed import seed_projects
 from server.pull_requests import refresh_periodically as refresh_pull_requests
 from server.remote_services import refresh_gh_auth_periodically
@@ -77,6 +78,8 @@ async def _on_startup() -> None:
     asyncio.create_task(refresh_gh_auth_periodically(gh_refresh_delay))  # noqa: RUF006
     # Delete the workspace behind a Linear run once its PR has merged.
     asyncio.create_task(reap_periodically())  # noqa: RUF006
+    # Delete workspaces that have sat archived for longer than the retention setting allows.
+    asyncio.create_task(reap_archives_periodically())  # noqa: RUF006
 
 
 async def _on_shutdown() -> None:
