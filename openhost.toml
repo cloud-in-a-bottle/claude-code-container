@@ -66,13 +66,14 @@ grants = [
 # openhost has access to (same OAuth flow openhost uses). Best-effort — public
 # repos clone without it, and if no grant exists the clone falls back to
 # unauthenticated. The same token logs gh in, which needs `read:org` for its
-# GraphQL queries (see "GitHub auth" in README.md).
+# GraphQL queries, and git pushes with it, which needs `workflow` for any commit
+# touching `.github/workflows/` (see "GitHub auth" in README.md).
 [[services.v2.consumes]]
 service = "github.com/imbue-openhost/openhost/services/oauth"
 shortname = "oauth"
 version = ">=0.1.0"
 grants = [
-    {provider = "github", scopes = ["repo", "read:org"]},
+    {provider = "github", scopes = ["repo", "read:org", "workflow"]},
 ]
 
 # Linear is reached through latchkey, which injects the owner's credentials into outbound calls, so
